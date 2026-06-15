@@ -1,9 +1,15 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+function getBaseUrl(): string {
+  try {
+    return import.meta.env.VITE_API_BASE_URL || '/api'
+  } catch {
+    return '/api'
+  }
+}
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getBaseUrl(),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -19,69 +25,84 @@ api.interceptors.response.use(
 )
 
 export const showcaseAPI = {
-  getAll: () => api.get('/showcases/showcases'),
-  getDetail: (id: number) => api.get(`/showcases/showcases/${id}`),
-  getSensors: (id: number) => api.get(`/showcases/showcases/${id}/sensors`),
-  getProfile: (id: number) => api.get(`/showcases/showcases/${id}/profile`),
-  recalculateProfile: (id: number) => api.post(`/showcases/showcases/${id}/profile/recalculate`),
-  getDashboardStats: () => api.get('/showcases/dashboard/stats'),
+  getAll: function () { return api.get('/showcases/showcases') },
+  getDetail: function (id: number) { return api.get('/showcases/showcases/' + id) },
+  getSensors: function (id: number) { return api.get('/showcases/showcases/' + id + '/sensors') },
+  getProfile: function (id: number) { return api.get('/showcases/showcases/' + id + '/profile') },
+  recalculateProfile: function (id: number) { return api.post('/showcases/showcases/' + id + '/profile/recalculate') },
+  getDashboardStats: function () { return api.get('/showcases/dashboard/stats') },
 }
 
 export const timeseriesAPI = {
-  getSensorReadings: (sensorId: number, params?: any) =>
-    api.get(`/timeseries/sensors/${sensorId}/readings`, { params }),
-  getShowcaseReadings: (showcaseId: number, params?: any) =>
-    api.get(`/timeseries/showcases/${showcaseId}/readings`, { params }),
-  getLatestReading: (sensorId: number) =>
-    api.get(`/timeseries/sensors/${sensorId}/latest`),
-  createReading: (sensorCode: string, value: number) =>
-    api.post('/timeseries/sensors/readings', null, { params: { sensor_code: sensorCode, value } }),
-  checkAnomaly: (sensorId: number, value: number) =>
-    api.get(`/timeseries/sensors/${sensorId}/anomalies/check`, { params: { value } }),
+  getSensorReadings: function (sensorId: number, params?: Record<string, unknown>) {
+    return api.get('/timeseries/sensors/' + sensorId + '/readings', { params: params })
+  },
+  getShowcaseReadings: function (showcaseId: number, params?: Record<string, unknown>) {
+    return api.get('/timeseries/showcases/' + showcaseId + '/readings', { params: params })
+  },
+  getLatestReading: function (sensorId: number) {
+    return api.get('/timeseries/sensors/' + sensorId + '/latest')
+  },
+  createReading: function (sensorCode: string, value: number) {
+    return api.post('/timeseries/sensors/readings', null, { params: { sensor_code: sensorCode, value: value } })
+  },
+  checkAnomaly: function (sensorId: number, value: number) {
+    return api.get('/timeseries/sensors/' + sensorId + '/anomalies/check', { params: { value: value } })
+  },
 }
 
 export const alertAPI = {
-  getAll: (params?: any) => api.get('/alerts/alerts', { params }),
-  getDetail: (id: number) => api.get(`/alerts/alerts/${id}`),
-  create: (data: any) => api.post('/alerts/alerts', data),
-  acknowledge: (id: number, operator: string = '管理员') =>
-    api.put(`/alerts/alerts/${id}/acknowledge`, null, { params: { operator } }),
-  resolve: (id: number, resolutionNote: string, operator: string = '管理员') =>
-    api.put(`/alerts/alerts/${id}/resolve`, null, { params: { resolution_note: resolutionNote, operator } }),
-  getSummary: () => api.get('/alerts/alerts/summary'),
-  getRecommendations: (alertId: number) =>
-    api.get(`/alerts/alerts/${alertId}/interventions/recommend'),
+  getAll: function (params?: Record<string, unknown>) { return api.get('/alerts/alerts', { params: params }) },
+  getDetail: function (id: number) { return api.get('/alerts/alerts/' + id) },
+  create: function (data: Record<string, unknown>) { return api.post('/alerts/alerts', data) },
+  acknowledge: function (id: number, operator?: string) {
+    return api.put('/alerts/alerts/' + id + '/acknowledge', null, { params: { operator: operator || '管理员' } })
+  },
+  resolve: function (id: number, resolutionNote: string, operator?: string) {
+    return api.put('/alerts/alerts/' + id + '/resolve', null, { params: { resolution_note: resolutionNote, operator: operator || '管理员' } })
+  },
+  getSummary: function () { return api.get('/alerts/alerts/summary') },
+  getRecommendations: function (alertId: number) {
+    return api.get('/alerts/alerts/' + alertId + '/interventions/recommend')
+  },
 }
 
 export const interventionAPI = {
-  getAll: (params?: any) => api.get('/interventions/interventions', { params }),
-  getDetail: (id: number) => api.get(`/interventions/interventions/${id}`),
-  create: (data: any) => api.post('/interventions/interventions', data),
-  start: (id: number, operator: string = '管理员') =>
-    api.put(`/interventions/interventions/${id}/start`, null, { params: { operator } }),
-  complete: (id: number, resultNote: string, operator: string = '管理员') =>
-    api.put(`/interventions/interventions/${id}/complete`, null, { params: { result_note: resultNote, operator } }),
-  getStrategies: (params?: any) => api.get('/interventions/strategies', { params }),
-  getStrategyDetail: (id: number) => api.get(`/interventions/strategies/${id}`),
-  getShowcaseRecommendations: (showcaseId: number) =>
-    api.get(`/interventions/showcases/${showcaseId}/interventions/recommend`),
+  getAll: function (params?: Record<string, unknown>) { return api.get('/interventions/interventions', { params: params }) },
+  getDetail: function (id: number) { return api.get('/interventions/interventions/' + id) },
+  create: function (data: Record<string, unknown>) { return api.post('/interventions/interventions', data) },
+  start: function (id: number, operator?: string) {
+    return api.put('/interventions/interventions/' + id + '/start', null, { params: { operator: operator || '管理员' } })
+  },
+  complete: function (id: number, resultNote: string, operator?: string) {
+    return api.put('/interventions/interventions/' + id + '/complete', null, { params: { result_note: resultNote, operator: operator || '管理员' } })
+  },
+  getStrategies: function (params?: Record<string, unknown>) { return api.get('/interventions/strategies', { params: params }) },
+  getStrategyDetail: function (id: number) { return api.get('/interventions/strategies/' + id) },
+  getShowcaseRecommendations: function (showcaseId: number) {
+    return api.get('/interventions/showcases/' + showcaseId + '/interventions/recommend')
+  },
 }
 
 export const analyticsAPI = {
-  getDispositions: (params?: any) => api.get('/analytics/dispositions', { params }),
-  createDisposition: (data: any) => api.post('/analytics/dispositions', data),
-  getShowcaseDispositions: (showcaseId: number, params?: any) =>
-    api.get(`/analytics/showcases/${showcaseId}/dispositions`, { params }),
-  getShowcaseTrends: (showcaseId: number, params?: any) =>
-    api.get(`/analytics/trends/showcases/${showcaseId}`, { params }),
-  analyzeTrend: (params: any) => api.post('/analytics/trends/analyze', null, { params }),
-  getTrendsSummary: (params?: any) => api.get('/analytics/trends/summary', { params }),
-  getDispositionsSummary: () => api.get('/analytics/dispositions/summary'),
+  getDispositions: function (params?: Record<string, unknown>) { return api.get('/analytics/dispositions', { params: params }) },
+  createDisposition: function (data: Record<string, unknown>) { return api.post('/analytics/dispositions', data) },
+  getShowcaseDispositions: function (showcaseId: number, params?: Record<string, unknown>) {
+    return api.get('/analytics/showcases/' + showcaseId + '/dispositions', { params: params })
+  },
+  getShowcaseTrends: function (showcaseId: number, params?: Record<string, unknown>) {
+    return api.get('/analytics/trends/showcases/' + showcaseId, { params: params })
+  },
+  analyzeTrend: function (params: Record<string, unknown>) {
+    return api.post('/analytics/trends/analyze', null, { params: params })
+  },
+  getTrendsSummary: function (params?: Record<string, unknown>) { return api.get('/analytics/trends/summary', { params: params }) },
+  getDispositionsSummary: function () { return api.get('/analytics/dispositions/summary') },
 }
 
 export const sensorAPI = {
-  getAll: (params?: any) => api.get('/showcases/sensors', { params }),
-  getDetail: (id: number) => api.get(`/showcases/sensors/${id}`),
+  getAll: function (params?: Record<string, unknown>) { return api.get('/showcases/sensors', { params: params }) },
+  getDetail: function (id: number) { return api.get('/showcases/sensors/' + id) },
 }
 
 export default api
