@@ -1,0 +1,304 @@
+import { useState, useEffect } from 'react'
+import {
+  Card,
+  Table,
+  Tag,
+  Button,
+  Space,
+  Select,
+  Input,
+  Row,
+  Col,
+  Statistic,
+  List,
+} from 'antd'
+import {
+  FileTextOutlined,
+  UserOutlined,
+  ClockCircleOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
+import { analyticsAPI, showcaseAPI } from '@/services/api'
+import dayjs from 'dayjs'
+
+const { Option } = Select
+const { Search } = Input
+
+function Dispositions() {
+  const [dispositions, setDispositions] = useState<any[]>([])
+  const [summary, setSummary] = useState<any>({})
+  const [showcases, setShowcases] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showcaseFilter, setShowcaseFilter] = useState<number | undefined>()
+  const [actionTypeFilter, setActionTypeFilter] = useState<string | undefined>()
+  const [operatorFilter, setOperatorFilter] = useState<string | undefined>()
+
+  useEffect(() => {
+    loadData()
+  }, [showcaseFilter, actionTypeFilter, operatorFilter])
+
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      const [dispositionsRes, summaryRes, showcasesRes] = await Promise.all([
+        analyticsAPI.getDispositions({
+          showcase_id: showcaseFilter,
+          action_type: actionTypeFilter,
+          operator: operatorFilter,
+          limit: 100,
+        }),
+        analyticsAPI.getDispositionsSummary(),
+        showcaseAPI.getAll(),
+      ])
+      setDispositions(dispositionsRes.data)
+      setSummary(summaryRes.data)
+      setShowcases(showcasesRes.data)
+    } catch (error) {
+      console.error('加载处置记录失败:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const getActionTypeTag = (type: string) => {
+    const typeMap: Record<string, { color: string; text: string }> = {
+      acknowledge: { color: 'blue', text: '告警确认' },
+      resolve: { color: 'green', text: '告警处理' },
+      create_intervention: { color: 'orange', text: '创建干预' },
+      start_intervention: { color: 'blue', text: '开始干预' },
+      complete_intervention: { color: 'green', text: '完成干预' },
+      manual_adjustment: { color: 'purple', text: '人工调整' },
+      equipment_maintenance: { color: 'cyan', text: '设备维护' },
+    }
+    const info = typeMap[type] || { color: 'default', text: type }
+    return <Tag color={info.color}>{info.text}</Tag>
+  }
+
+  const columns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 60,
+    },
+    {
+      title: '操作类型',
+      dataIndex: 'action_type',
+      key: 'action_type',
+      width: 120,
+      render: (type: string) => getActionTypeTag(type),
+    },
+    {
+      title: '操作人员',
+      dataIndex: 'operator',
+      key: 'operator',
+      width: 100,
+      render: (op: string) => (
+        <Space>
+          <UserOutlined />
+          <span>{op}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '操作详情',
+      dataIndex: 'details',
+      key: 'details',
+      ellipsis: true,
+    },
+    {
+      title: '关联告警',
+      dataIndex: 'alert_id',
+      key: 'alert_id',
+      width: 80,
+      render: (id: number) => id ? `#${id}` : '-',
+    },
+    {
+      title: '关联干预',
+      dataIndex: 'intervention_id',
+      key: 'intervention_id',
+      width: 80,
+      render: (id: number) => id ? `#${id}` : '-',
+    },
+    {
+      title: '状态变化',
+      key: 'status',
+      width: 150,
+      render: (_: any, record: any) => (
+        <Space size="small">
+          <Tag>{record.before_status || '-'}</Tag>
+          <span>→</span>
+          <Tag color="green">{record.after_status || '-'}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: '操作时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 160,
+      render: (time: string) => dayjs(time).format('YYYY-MM-DD HH:mm:ss'),
+    },
+  ]
+
+  const topOperators = summary.top_operators || []
+  const actionTypeStats = summary.by_action_type || {}
+
+  return (
+    <div>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card className="stat-card">
+            <Statistic
+              title="处置记录总数"
+              value={summary.total_count || 0}
+              valueStyle={{ color: '#1890ff' }}
+              prefix={<FileTextOutlined />}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card className="stat-card">
+            <Statistic
+              title="近7天处置"
+              value={summary.last_7_days_count || 0}
+              valueStyle={{ color: '#52c41a' }}
+              prefix={<ClockCircleOutlined />}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card className="stat-card">
+            <Statistic
+              title="近30天处置"
+              value={summary.last_30_days_count || 0}
+              valueStyle={{ color: '#722ed1' }}
+              prefix={<ClockCircleOutlined />}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col span={18}>
+          <Card
+            title="处置记录"
+            extra={
+              <Space>
+                <Select
+                  placeholder="展柜筛选"
+                  allowClear
+                  style={{ width: 150 }}
+                  value={showcaseFilter}
+                  onChange={setShowcaseFilter}
+                >
+                  {showcases.map((sc) => (
+                    <Option key={sc.id} value={sc.id}>{sc.name}</Option>
+                  ))}
+                </Select>
+                <Select
+                  placeholder="操作类型"
+                  allowClear
+                  style={{ width: 130 }}
+                  value={actionTypeFilter}
+                  onChange={setActionTypeFilter}
+                >
+                  <Option value="acknowledge">告警确认</Option>
+                  <Option value="resolve">告警处理</Option>
+                  <Option value="create_intervention">创建干预</Option>
+                  <Option value="start_intervention">开始干预</Option>
+                  <Option value="complete_intervention">完成干预</Option>
+                </Select>
+                <Search
+                  placeholder="搜索操作人员"
+                  allowClear
+                  style={{ width: 150 }}
+                  prefix={<SearchOutlined />}
+                  onSearch={(value) => setOperatorFilter(value || undefined)}
+                />
+                <Button type="primary" onClick={loadData}>刷新</Button>
+              </Space>
+            }
+          >
+            <Table
+              columns={columns}
+              dataSource={dispositions}
+              rowKey="id"
+              loading={loading}
+              pagination={{ pageSize: 10 }}
+              scroll={{ x: 1000 }}
+            />
+          </Card>
+        </Col>
+
+        <Col span={6}>
+          <Card title="操作人员排行" size="small" style={{ marginBottom: 16 }}>
+            <List
+              dataSource={topOperators}
+              renderItem={(item: any, index: number) => (
+                <List.Item key={item.operator}>
+                  <List.Item.Meta
+                    avatar={
+                      <div style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: '50%',
+                        background: index < 3 ? '#faad14' : '#1890ff',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 12,
+                        fontWeight: 'bold',
+                      }}>
+                        {index + 1}
+                      </div>
+                    }
+                    title={item.operator}
+                    description={`${item.count} 次操作`}
+                  />
+                </List.Item>
+              )}
+            />
+            {topOperators.length === 0 && (
+              <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>暂无数据</div>
+            )}
+          </Card>
+
+          <Card title="操作类型统计" size="small">
+            {Object.entries(actionTypeStats).map(([type, count]) => (
+              <div key={type} style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  {getActionTypeTag(type)}
+                  <span style={{ fontWeight: 500 }}>{count as number} 次</span>
+                </div>
+                <div
+                  style={{
+                    height: 6,
+                    borderRadius: 3,
+                    background: '#f0f0f0',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.min(100, ((count as number) / (summary.total_count || 1)) * 100)}%`,
+                      height: '100%',
+                      background: '#1890ff',
+                      borderRadius: 3,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+            {Object.keys(actionTypeStats).length === 0 && (
+              <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>暂无数据</div>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  )
+}
+
+export default Dispositions

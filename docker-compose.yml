@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: museum-timescaledb
+    environment:
+      POSTGRES_USER: museum_admin
+      POSTGRES_PASSWORD: museum_secure_pass_2024
+      POSTGRES_DB: museum_env
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./database/timescale/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U museum_admin -d museum_env"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - museum-network
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: museum-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: admin_secure_2024
+      DOCKER_INFLUXDB_INIT_ORG: museum
+      DOCKER_INFLUXDB_INIT_BUCKET: sensor_data
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: museum-influx-token-2024-secret
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - museum-network
+
+  emqx:
+    image: emqx/emqx:5.3.0
+    container_name: museum-emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "8883:8883"
+      - "8084:8084"
+      - "18083:18083"
+    environment:
+      EMQX_NAME: museum-mqtt
+      EMQX_HOST: 127.0.0.1
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+      - emqx_etc:/opt/emqx/etc
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - museum-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: museum-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - TIMESCALE_HOST=timescaledb
+      - TIMESCALE_PORT=5432
+      - TIMESCALE_USER=museum_admin
+      - TIMESCALE_PASSWORD=museum_secure_pass_2024
+      - TIMESCALE_DB=museum_env
+      - INFLUXDB_HOST=influxdb
+      - INFLUXDB_PORT=8086
+      - INFLUXDB_TOKEN=museum-influx-token-2024-secret
+      - INFLUXDB_ORG=museum
+      - INFLUXDB_BUCKET=sensor_data
+      - MQTT_HOST=emqx
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=admin
+      - MQTT_PASSWORD=public
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - museum-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: museum-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000/api
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev
+    networks:
+      - museum-network
+
+  data-simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: museum-simulator
+    environment:
+      - MQTT_HOST=emqx
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=admin
+      - MQTT_PASSWORD=public
+    depends_on:
+      emqx:
+        condition: service_healthy
+    volumes:
+      - ./simulator:/app
+    networks:
+      - museum-network
+
+volumes:
+  timescaledb_data:
+  influxdb_data:
+  influxdb_config:
+  emqx_data:
+  emqx_log:
+  emqx_etc:
+
+networks:
+  museum-network:
+    driver: bridge
