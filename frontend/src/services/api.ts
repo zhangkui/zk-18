@@ -16,47 +16,13 @@ const api = axios.create({
   },
 })
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
-      }
-    }
     console.error('API Error:', error)
     return Promise.reject(error)
   }
 )
-
-export const authAPI = {
-  login: function (username: string, password: string) {
-    return api.post('/users/login', { username, password })
-  },
-  getMe: function () {
-    return api.get('/users/me')
-  },
-}
-
-export const userAPI = {
-  getAll: function (params?: Record<string, unknown>) { return api.get('/users/users', { params }) },
-  getDetail: function (id: number) { return api.get('/users/users/' + id) },
-  create: function (data: Record<string, unknown>) { return api.post('/users/users', data) },
-  update: function (id: number, data: Record<string, unknown>) { return api.put('/users/users/' + id, data) },
-  disable: function (id: number) { return api.put('/users/users/' + id + '/disable') },
-  enable: function (id: number) { return api.put('/users/users/' + id + '/enable') },
-  delete: function (id: number) { return api.delete('/users/users/' + id) },
-}
 
 export const showcaseAPI = {
   getAll: function () { return api.get('/showcases/showcases') },
@@ -65,21 +31,6 @@ export const showcaseAPI = {
   getProfile: function (id: number) { return api.get('/showcases/showcases/' + id + '/profile') },
   recalculateProfile: function (id: number) { return api.post('/showcases/showcases/' + id + '/profile/recalculate') },
   getDashboardStats: function () { return api.get('/showcases/dashboard/stats') },
-  create: function (data: Record<string, unknown>) { return api.post('/showcases/showcases', data) },
-  update: function (id: number, data: Record<string, unknown>) { return api.put('/showcases/showcases/' + id, data) },
-  disable: function (id: number) { return api.put('/showcases/showcases/' + id + '/disable') },
-  enable: function (id: number) { return api.put('/showcases/showcases/' + id + '/enable') },
-  delete: function (id: number) { return api.delete('/showcases/showcases/' + id) },
-}
-
-export const sensorAPI = {
-  getAll: function (params?: Record<string, unknown>) { return api.get('/sensors/sensors', { params }) },
-  getDetail: function (id: number) { return api.get('/sensors/sensors/' + id) },
-  create: function (data: Record<string, unknown>) { return api.post('/sensors/sensors', data) },
-  update: function (id: number, data: Record<string, unknown>) { return api.put('/sensors/sensors/' + id, data) },
-  disable: function (id: number) { return api.put('/sensors/sensors/' + id + '/disable') },
-  enable: function (id: number) { return api.put('/sensors/sensors/' + id + '/enable') },
-  delete: function (id: number) { return api.delete('/sensors/sensors/' + id) },
 }
 
 export const timeseriesAPI = {
@@ -128,11 +79,6 @@ export const interventionAPI = {
   },
   getStrategies: function (params?: Record<string, unknown>) { return api.get('/interventions/strategies', { params: params }) },
   getStrategyDetail: function (id: number) { return api.get('/interventions/strategies/' + id) },
-  createStrategy: function (data: Record<string, unknown>) { return api.post('/interventions/strategies', data) },
-  updateStrategy: function (id: number, data: Record<string, unknown>) { return api.put('/interventions/strategies/' + id, data) },
-  disableStrategy: function (id: number) { return api.put('/interventions/strategies/' + id + '/disable') },
-  enableStrategy: function (id: number) { return api.put('/interventions/strategies/' + id + '/enable') },
-  deleteStrategy: function (id: number) { return api.delete('/interventions/strategies/' + id) },
   getShowcaseRecommendations: function (showcaseId: number) {
     return api.get('/interventions/showcases/' + showcaseId + '/interventions/recommend')
   },
@@ -152,6 +98,11 @@ export const analyticsAPI = {
   },
   getTrendsSummary: function (params?: Record<string, unknown>) { return api.get('/analytics/trends/summary', { params: params }) },
   getDispositionsSummary: function () { return api.get('/analytics/dispositions/summary') },
+}
+
+export const sensorAPI = {
+  getAll: function (params?: Record<string, unknown>) { return api.get('/showcases/sensors', { params: params }) },
+  getDetail: function (id: number) { return api.get('/showcases/sensors/' + id) },
 }
 
 export default api
