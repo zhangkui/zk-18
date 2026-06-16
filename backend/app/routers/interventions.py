@@ -8,9 +8,13 @@ from app.schemas import (
     Intervention as InterventionSchema,
     InterventionCreate,
     InterventionUpdate,
-    InterventionStrategy as StrategySchema
+    InterventionStrategy as StrategySchema,
+    InterventionStrategyCreate,
+    InterventionStrategyUpdate,
 )
 from app.services.intervention_engine import intervention_engine
+from app.auth import get_current_user
+from app.models import User
 
 router = APIRouter()
 
@@ -208,3 +212,84 @@ def get_showcase_intervention_recommendations(showcase_id: int, db: Session = De
         "preventive_strategies": preventive_strategies,
         "alert_based_recommendations": alert_recommendations
     }
+
+
+@router.post("/strategies", response_model=StrategySchema)
+def create_strategy(
+    strategy_data: InterventionStrategyCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if db.query(InterventionStrategy).filter(InterventionStrategy.code == strategy_data.code).first():
+        raise HTTPException(status_code=400, detail="策略编号已存在")
+    strategy = InterventionStrategy(**strategy_data.dict())
+    db.add(strategy)
+    db.commit()
+    db.refresh(strategy)
+    return strategy
+
+
+@router.put("/strategies/{strategy_id}", response_model=StrategySchema)
+def update_strategy(
+    strategy_id: int,
+    strategy_data: InterventionStrategyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    strategy = db.query(InterventionStrategy).filter(InterventionStrategy.id == strategy_id).first()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="干预策略不存在")
+    update_dict = strategy_data.dict(exclude_unset=True)
+    if "code" in update_dict and update_dict["code"] != strategy.code:
+        if db.query(InterventionStrategy).filter(InterventionStrategy.code == update_dict["code"]).first():
+            raise HTTPException(status_code=400, detail="策略编号已存在")
+    for key, value in update_dict.items():
+        setattr(strategy, key, value)
+    strategy.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(strategy)
+    return strategy
+
+
+@router.put("/strategies/{strategy_id}/disable")
+def disable_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    strategy = db.query(InterventionStrategy).filter(InterventionStrategy.id == strategy_id).first()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="干预策略不存在")
+    strategy.is_active = False
+    strategy.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "策略已停用"}
+
+
+@router.put("/strategies/{strategy_id}/enable")
+def enable_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    strategy = db.query(InterventionStrategy).filter(InterventionStrategy.id == strategy_id).first()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="干预策略不存在")
+    strategy.is_active = True
+    strategy.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "策略已启用"}
+
+
+@router.delete("/strategies/{strategy_id}")
+def delete_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    strategy = db.query(InterventionStrategy).filter(InterventionStrategy.id == strategy_id).first()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="干预策略不存在")
+    db.delete(strategy)
+    db.commit()
+    return {"message": "策略已删除"}

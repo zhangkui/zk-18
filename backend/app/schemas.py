@@ -15,6 +15,14 @@ class ShowcaseCreate(ShowcaseBase):
     pass
 
 
+class ShowcaseUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
 class Showcase(ShowcaseBase):
     id: int
     created_at: datetime
@@ -38,6 +46,18 @@ class SensorBase(BaseModel):
 
 class SensorCreate(SensorBase):
     pass
+
+
+class SensorUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    showcase_id: Optional[int] = None
+    sensor_type: Optional[str] = None
+    unit: Optional[str] = None
+    min_threshold: Optional[float] = None
+    max_threshold: Optional[float] = None
+    warning_threshold: Optional[float] = None
+    status: Optional[str] = None
 
 
 class Sensor(SensorBase):
@@ -146,6 +166,17 @@ class InterventionStrategyBase(BaseModel):
 
 class InterventionStrategyCreate(InterventionStrategyBase):
     pass
+
+
+class InterventionStrategyUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    trigger_condition: Optional[str] = None
+    action_steps: Optional[str] = None
+    applicable_sensor_types: Optional[List[str]] = None
+    severity_level: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class InterventionStrategy(InterventionStrategyBase):
@@ -286,3 +317,51 @@ class MQTTSensorData(BaseModel):
     value: float
     timestamp: datetime
     quality: Optional[int] = 1
+
+
+class UserBase(BaseModel):
+    username: str
+    real_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = "operator"
+    status: Optional[str] = "active"
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    real_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = "operator"
+    status: Optional[str] = "active"
+
+
+class UserUpdate(BaseModel):
+    real_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    password: Optional[str] = None
+
+
+class User(UserBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]

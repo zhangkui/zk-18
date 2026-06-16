@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     MQTT_PASSWORD: str = "public"
     MQTT_TOPIC_PREFIX: str = "museum/sensor"
 
+    SECRET_KEY: str = "museum-jwt-secret-key-2024-secure"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
     class Config:
         env_file = ".env"
         case_sensitive = True

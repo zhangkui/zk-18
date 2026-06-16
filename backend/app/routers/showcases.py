@@ -1,10 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 from app.database import get_db
 from app.models import Showcase, Sensor
-from app.schemas import Showcase as ShowcaseSchema, Sensor as SensorSchema, DashboardStats
+from app.schemas import (
+    Showcase as ShowcaseSchema,
+    ShowcaseCreate,
+    ShowcaseUpdate,
+    Sensor as SensorSchema,
+    DashboardStats,
+)
 from app.services.profiler import showcase_profiler
+from app.auth import get_current_user
+from app.models import User
 from sqlalchemy import func
 
 router = APIRouter()
@@ -140,3 +149,87 @@ def recalculate_showcase_profile(showcase_id: int, db: Session = Depends(get_db)
     if not profile:
         raise HTTPException(status_code=404, detail="展柜不存在")
     return {"message": "展柜画像已更新", "profile": profile}
+
+
+@router.post("/showcases", response_model=ShowcaseSchema)
+def create_showcase(
+    showcase_data: ShowcaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if db.query(Showcase).filter(Showcase.code == showcase_data.code).first():
+        raise HTTPException(status_code=400, detail="展柜编号已存在")
+    showcase = Showcase(**showcase_data.dict())
+    db.add(showcase)
+    db.commit()
+    db.refresh(showcase)
+    return showcase
+
+
+@router.put("/showcases/{showcase_id}", response_model=ShowcaseSchema)
+def update_showcase(
+    showcase_id: int,
+    showcase_data: ShowcaseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
+    if not showcase:
+        raise HTTPException(status_code=404, detail="展柜不存在")
+    update_dict = showcase_data.dict(exclude_unset=True)
+    if "code" in update_dict and update_dict["code"] != showcase.code:
+        if db.query(Showcase).filter(Showcase.code == update_dict["code"]).first():
+            raise HTTPException(status_code=400, detail="展柜编号已存在")
+    for key, value in update_dict.items():
+        setattr(showcase, key, value)
+    showcase.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(showcase)
+    return showcase
+
+
+@router.put("/showcases/{showcase_id}/disable")
+def disable_showcase(
+    showcase_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
+    if not showcase:
+        raise HTTPException(status_code=404, detail="展柜不存在")
+    showcase.status = "inactive"
+    showcase.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "展柜已停用"}
+
+
+@router.put("/showcases/{showcase_id}/enable")
+def enable_showcase(
+    showcase_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
+    if not showcase:
+        raise HTTPException(status_code=404, detail="展柜不存在")
+    showcase.status = "active"
+    showcase.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "展柜已启用"}
+
+
+@router.delete("/showcases/{showcase_id}")
+def delete_showcase(
+    showcase_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
+    if not showcase:
+        raise HTTPException(status_code=404, detail="展柜不存在")
+    sensors = db.query(Sensor).filter(Sensor.showcase_id == showcase_id).count()
+    if sensors > 0:
+        raise HTTPException(status_code=400, detail="该展柜下还有传感器，请先移除传感器")
+    db.delete(showcase)
+    db.commit()
+    return {"message": "展柜已删除"}

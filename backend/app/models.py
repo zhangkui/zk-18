@@ -1,7 +1,23 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean, ARRAY, Interval, Date
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean, ARRAY, Interval, Date, Enum
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
+import enum
+
+
+class User(Base):
+    __tablename__ = "user"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    real_name = Column(String(100))
+    phone = Column(String(20))
+    email = Column(String(100))
+    role = Column(String(20), default="operator")
+    status = Column(String(20), default="active")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class Showcase(Base):
