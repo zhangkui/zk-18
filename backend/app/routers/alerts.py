@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import func
 from app.database import get_db
 from app.models import Alert, Sensor, Showcase, DispositionRecord
 from app.schemas import Alert as AlertSchema, AlertCreate, AlertUpdate
@@ -32,6 +33,42 @@ def get_alerts(
 
     alerts = query.order_by(Alert.triggered_at.desc()).limit(limit).all()
     return alerts
+
+
+@router.get("/alerts/summary")
+def get_alert_summary(db: Session = Depends(get_db)):
+    pending_count = db.query(Alert).filter(Alert.status == "pending").count()
+    acknowledged_count = db.query(Alert).filter(Alert.status == "acknowledged").count()
+    resolved_count = db.query(Alert).filter(Alert.status == "resolved").count()
+
+    critical_count = db.query(Alert).filter(
+        Alert.level == "critical",
+        Alert.status.in_(["pending", "acknowledged"])
+    ).count()
+    warning_count = db.query(Alert).filter(
+        Alert.level == "warning",
+        Alert.status.in_(["pending", "acknowledged"])
+    ).count()
+
+    last_24h = datetime.utcnow() - timedelta(hours=24)
+    today_count = db.query(Alert).filter(Alert.triggered_at >= last_24h).count()
+
+    alert_types = db.query(
+        Alert.alert_type,
+        func.count(Alert.id)
+    ).group_by(Alert.alert_type).all()
+
+    by_alert_type = {at: cnt for at, cnt in alert_types}
+
+    return {
+        "pending": pending_count,
+        "acknowledged": acknowledged_count,
+        "resolved": resolved_count,
+        "critical_active": critical_count,
+        "warning_active": warning_count,
+        "last_24h_count": today_count,
+        "by_alert_type": by_alert_type
+    }
 
 
 @router.get("/alerts/{alert_id}")
@@ -132,34 +169,6 @@ def resolve_alert(
     db.refresh(alert)
 
     return {"message": "告警已处理", "alert": alert}
-
-
-@router.get("/alerts/summary")
-def get_alert_summary(db: Session = Depends(get_db)):
-    pending_count = db.query(Alert).filter(Alert.status == "pending").count()
-    acknowledged_count = db.query(Alert).filter(Alert.status == "acknowledged").count()
-    resolved_count = db.query(Alert).filter(Alert.status == "resolved").count()
-
-    critical_count = db.query(Alert).filter(
-        Alert.level == "critical",
-        Alert.status.in_(["pending", "acknowledged"])
-    ).count()
-    warning_count = db.query(Alert).filter(
-        Alert.level == "warning",
-        Alert.status.in_(["pending", "acknowledged"])
-    ).count()
-
-    last_24h = datetime.utcnow() - timedelta(hours=24)
-    today_count = db.query(Alert).filter(Alert.triggered_at >= last_24h).count()
-
-    return {
-        "pending": pending_count,
-        "acknowledged": acknowledged_count,
-        "resolved": resolved_count,
-        "critical_active": critical_count,
-        "warning_active": warning_count,
-        "last_24h_count": today_count
-    }
 
 
 @router.get("/alerts/{alert_id}/interventions/recommend")

@@ -38,6 +38,7 @@ function ShowcaseDetail() {
   const [interventions, setInterventions] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('overview')
+  const [sensorReadings, setSensorReadings] = useState<Record<number, any[]>>({})
 
   useEffect(() => {
     if (id) {
@@ -59,6 +60,18 @@ function ShowcaseDetail() {
       setProfile(profileRes.data)
       setAlerts(alertsRes.data)
       setInterventions(interventionsRes.data)
+
+      const readingsMap: Record<number, any[]> = {}
+      for (const sensor of detailRes.data.sensors || []) {
+        try {
+          const res = await timeseriesAPI.getSensorReadings(sensor.id, { limit: 100 })
+          readingsMap[sensor.id] = res.data.data || []
+        } catch (err) {
+          console.error(`加载传感器 ${sensor.id} 读数失败:`, err)
+          readingsMap[sensor.id] = []
+        }
+      }
+      setSensorReadings(readingsMap)
     } catch (error) {
       console.error('加载展柜详情失败:', error)
     } finally {
@@ -99,29 +112,20 @@ function ShowcaseDetail() {
     return '#ff4d4f'
   }
 
-  const getSensorTypeChart = (sensorType: string, sensorName: string, unit: string, color: string) => {
-    const data: any[][] = []
-    const now = new Date()
-    for (let i = 24; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-      let baseValue = 20
-      if (sensorType === 'humidity') baseValue = 50
-      if (sensorType === 'light') baseValue = 80
-      if (sensorType === 'vibration') baseValue = 0.1
-      const value = baseValue + Math.sin(i / 6) * (baseValue * 0.1) + Math.random() * (baseValue * 0.05)
-      data.push([time, value.toFixed(2)])
-    }
+  const getSensorTypeChart = (sensor: any, color: string) => {
+    const readings = sensorReadings[sensor.id] || []
+    const chartData = readings.map(r => [new Date(r.time), Number(r.value).toFixed(2)])
 
     return {
-      title: { text: sensorName, left: 'center', textStyle: { fontSize: 14 } },
+      title: { text: sensor.name, left: 'center', textStyle: { fontSize: 14 } },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time', splitLine: { show: false } },
-      yAxis: { type: 'value', name: unit, splitLine: { lineStyle: { type: 'dashed' } } },
+      yAxis: { type: 'value', name: sensor.unit, splitLine: { lineStyle: { type: 'dashed' } } },
       series: [{
-        name: sensorName,
+        name: sensor.name,
         type: 'line',
         smooth: true,
-        data,
+        data: chartData,
         lineStyle: { color },
         areaStyle: {
           color: {
@@ -136,6 +140,13 @@ function ShowcaseDetail() {
       }],
       grid: { left: 50, right: 20, top: 40, bottom: 30 },
     }
+  }
+
+  const sensorTypeColorMap: Record<string, string> = {
+    temperature: '#ff7875',
+    humidity: '#40a9ff',
+    light: '#ffd666',
+    vibration: '#95de64',
   }
 
   const renderOverview = () => (
@@ -238,34 +249,10 @@ function ShowcaseDetail() {
       <Col span={16}>
         <Card title="环境参数实时监测" size="small">
           <Row gutter={[16, 16]}>
-            {sensors.filter(s => s.sensor_type === 'temperature').map(sensor => (
+            {sensors.map(sensor => (
               <Col span={12} key={sensor.id}>
                 <ReactECharts
-                  option={getSensorTypeChart('temperature', sensor.name, '°C', '#ff7875')}
-                  style={{ height: 220 }}
-                />
-              </Col>
-            ))}
-            {sensors.filter(s => s.sensor_type === 'humidity').map(sensor => (
-              <Col span={12} key={sensor.id}>
-                <ReactECharts
-                  option={getSensorTypeChart('humidity', sensor.name, '%RH', '#40a9ff')}
-                  style={{ height: 220 }}
-                />
-              </Col>
-            ))}
-            {sensors.filter(s => s.sensor_type === 'light').map(sensor => (
-              <Col span={12} key={sensor.id}>
-                <ReactECharts
-                  option={getSensorTypeChart('light', sensor.name, 'lux', '#ffd666')}
-                  style={{ height: 220 }}
-                />
-              </Col>
-            ))}
-            {sensors.filter(s => s.sensor_type === 'vibration').map(sensor => (
-              <Col span={12} key={sensor.id}>
-                <ReactECharts
-                  option={getSensorTypeChart('vibration', sensor.name, 'mm/s', '#95de64')}
+                  option={getSensorTypeChart(sensor, sensorTypeColorMap[sensor.sensor_type] || '#8c8c8c')}
                   style={{ height: 220 }}
                 />
               </Col>

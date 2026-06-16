@@ -24,7 +24,7 @@ app.add_middleware(
 app.include_router(showcases.router, prefix=f"{settings.API_PREFIX}/showcases", tags=["展柜管理"])
 app.include_router(timeseries.router, prefix=f"{settings.API_PREFIX}/timeseries", tags=["时序数据"])
 app.include_router(alerts.router, prefix=f"{settings.API_PREFIX}/alerts", tags=["告警管理"])
-app.include_router(interventions.router, prefix=f"{settings.API_PREFIX}", tags=["干预管理"])
+app.include_router(interventions.router, prefix=f"{settings.API_PREFIX}/interventions", tags=["干预管理"])
 app.include_router(analytics.router, prefix=f"{settings.API_PREFIX}/analytics", tags=["分析统计"])
 
 

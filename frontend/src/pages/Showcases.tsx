@@ -109,16 +109,16 @@ function Showcases() {
                     <div style={{ marginBottom: 8 }}>编号: {showcase.code}</div>
                     <div style={{ marginBottom: 8 }}>{showcase.location}</div>
                     <div style={{ marginBottom: 8 }}>
-                      <Tag className={`risk-tag ${getRiskLevelClass('low')}`}>
-                        {getRiskLevelText('low')}
+                      <Tag className={`risk-tag ${getRiskLevelClass(showcase.risk_level || 'low')}`}>
+                        {getRiskLevelText(showcase.risk_level || 'low')}
                       </Tag>
                     </div>
                     <Space size="middle">
                       <span style={{ color: '#666' }}>
-                        温度: 20.5°C
+                        温度: {showcase.latest_data?.temperature ? `${showcase.latest_data.temperature.value}°C` : '-'}
                       </span>
                       <span style={{ color: '#666' }}>
-                        湿度: 50.2%RH
+                        湿度: {showcase.latest_data?.humidity ? `${showcase.latest_data.humidity.value}%RH` : '-'}
                       </span>
                     </Space>
                   </div>

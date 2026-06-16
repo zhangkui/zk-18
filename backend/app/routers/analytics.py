@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from app.database import get_db
 from app.models import DispositionRecord, Showcase, Alert, Intervention
 from app.schemas import DispositionRecord as DispositionSchema, DispositionRecordCreate

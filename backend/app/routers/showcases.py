@@ -10,10 +10,41 @@ from sqlalchemy import func
 router = APIRouter()
 
 
-@router.get("/showcases", response_model=List[ShowcaseSchema])
+@router.get("/showcases")
 def get_showcases(db: Session = Depends(get_db)):
+    from app.models import SensorReading, ShowcaseProfile
+
     showcases = db.query(Showcase).all()
-    return showcases
+    result = []
+    for sc in showcases:
+        sensors = db.query(Sensor).filter(Sensor.showcase_id == sc.id).all()
+        latest_data = {}
+        for sensor in sensors:
+            latest = db.query(SensorReading).filter(
+                SensorReading.sensor_id == sensor.id
+            ).order_by(SensorReading.time.desc()).first()
+            if latest:
+                latest_data[sensor.sensor_type] = {
+                    "value": latest.value,
+                    "time": latest.time,
+                    "unit": sensor.unit,
+                }
+        profile = db.query(ShowcaseProfile).filter(
+            ShowcaseProfile.showcase_id == sc.id
+        ).first()
+        result.append({
+            "id": sc.id,
+            "code": sc.code,
+            "name": sc.name,
+            "location": sc.location,
+            "description": sc.description,
+            "status": sc.status,
+            "created_at": sc.created_at,
+            "updated_at": sc.updated_at,
+            "latest_data": latest_data,
+            "risk_level": profile.risk_level if profile else "low",
+        })
+    return result
 
 
 @router.get("/showcases/{showcase_id}")

@@ -10,7 +10,7 @@ import {
   EyeOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
-import { showcaseAPI, alertAPI } from '@/services/api'
+import { showcaseAPI, alertAPI, timeseriesAPI } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
 
 function Dashboard() {
@@ -19,6 +19,9 @@ function Dashboard() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [showcases, setShowcases] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [tempData, setTempData] = useState<any[]>([])
+  const [humData, setHumData] = useState<any[]>([])
+  const [alertSummary, setAlertSummary] = useState<any>({})
 
   useEffect(() => {
     loadData()
@@ -29,14 +32,30 @@ function Dashboard() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [statsRes, alertsRes, showcasesRes] = await Promise.all([
+      const [statsRes, alertsRes, showcasesRes, summaryRes] = await Promise.all([
         showcaseAPI.getDashboardStats(),
         alertAPI.getAll({ status: 'pending', limit: 5 }),
         showcaseAPI.getAll(),
+        alertAPI.getSummary(),
       ])
       setStats(statsRes.data)
       setAlerts(alertsRes.data)
       setShowcases(showcasesRes.data)
+      setAlertSummary(summaryRes.data)
+
+      if (showcasesRes.data && showcasesRes.data.length > 0) {
+        const firstShowcaseId = showcasesRes.data[0].id
+        try {
+          const [tempRes, humRes] = await Promise.all([
+            timeseriesAPI.getShowcaseReadings(firstShowcaseId, { sensor_type: 'temperature' }),
+            timeseriesAPI.getShowcaseReadings(firstShowcaseId, { sensor_type: 'humidity' }),
+          ])
+          setTempData(tempRes.data.sensors?.temperature?.data || [])
+          setHumData(humRes.data.sensors?.humidity?.data || [])
+        } catch (chartErr) {
+          console.error('加载图表数据失败:', chartErr)
+        }
+      }
     } catch (error) {
       console.error('加载数据失败:', error)
     } finally {
@@ -60,6 +79,24 @@ function Dashboard() {
     }
   }
 
+  const getRiskLevelClass = (level: string) => {
+    switch (level) {
+      case 'high': return 'risk-high'
+      case 'medium': return 'risk-medium'
+      case 'low': return 'risk-low'
+      default: return 'risk-low'
+    }
+  }
+
+  const getRiskLevelText = (level: string) => {
+    switch (level) {
+      case 'high': return '高风险'
+      case 'medium': return '中风险'
+      case 'low': return '低风险'
+      default: return '未知'
+    }
+  }
+
   const temperatureChartOption = {
     title: { text: '温度趋势 (24h)', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'axis' },
@@ -76,7 +113,7 @@ function Dashboard() {
       name: '平均温度',
       type: 'line',
       smooth: true,
-      data: generateMockTempData(),
+      data: tempData.map(d => [new Date(d.time), Number(d.value).toFixed(1)]),
       lineStyle: { color: '#ff7875' },
       areaStyle: {
         color: {
@@ -101,7 +138,7 @@ function Dashboard() {
       name: '平均湿度',
       type: 'line',
       smooth: true,
-      data: generateMockHumData(),
+      data: humData.map(d => [new Date(d.time), Number(d.value).toFixed(1)]),
       lineStyle: { color: '#40a9ff' },
       areaStyle: {
         color: {
@@ -117,6 +154,32 @@ function Dashboard() {
     grid: { left: 50, right: 20, top: 40, bottom: 30 },
   }
 
+  const alertTypeNames: Record<string, string> = {
+    temperature: '温度异常',
+    humidity: '湿度异常',
+    light: '光照异常',
+    vibration: '震动异常',
+  }
+  const alertTypeColors: Record<string, string> = {
+    temperature: '#ff7875',
+    humidity: '#40a9ff',
+    light: '#ffd666',
+    vibration: '#95de64',
+  }
+  const byAlertType = alertSummary.by_alert_type || {}
+  const alertPieData = Object.entries(byAlertType).length > 0
+    ? Object.entries(byAlertType).map(([type, count]) => ({
+        value: count as number,
+        name: alertTypeNames[type] || type,
+        itemStyle: { color: alertTypeColors[type] || '#8c8c8c' },
+      }))
+    : [
+        { value: 0, name: '温度异常', itemStyle: { color: '#ff7875' } },
+        { value: 0, name: '湿度异常', itemStyle: { color: '#40a9ff' } },
+        { value: 0, name: '光照异常', itemStyle: { color: '#ffd666' } },
+        { value: 0, name: '震动异常', itemStyle: { color: '#95de64' } },
+      ]
+
   const alertDistributionOption = {
     title: { text: '告警类型分布', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'item' },
@@ -129,12 +192,7 @@ function Dashboard() {
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
       labelLine: { show: false },
-      data: [
-        { value: 35, name: '温度异常', itemStyle: { color: '#ff7875' } },
-        { value: 28, name: '湿度异常', itemStyle: { color: '#40a9ff' } },
-        { value: 15, name: '光照异常', itemStyle: { color: '#ffd666' } },
-        { value: 8, name: '震动异常', itemStyle: { color: '#95de64' } },
-      ],
+      data: alertPieData,
     }],
   }
 
@@ -145,7 +203,7 @@ function Dashboard() {
           <Card className="stat-card">
             <Statistic
               title="展柜总数"
-              value={stats?.total_showcases || 5}
+              value={stats?.total_showcases || 0}
               prefix={<EnvironmentOutlined style={{ color: '#1890ff' }} />}
               valueStyle={{ color: '#1890ff' }}
             />
@@ -155,7 +213,7 @@ function Dashboard() {
           <Card className="stat-card">
             <Statistic
               title="活跃传感器"
-              value={stats?.active_sensors || 20}
+              value={stats?.active_sensors || 0}
               prefix={<AlertOutlined style={{ color: '#52c41a' }} />}
               valueStyle={{ color: '#52c41a' }}
             />
@@ -165,7 +223,7 @@ function Dashboard() {
           <Card className="stat-card">
             <Statistic
               title="活跃告警"
-              value={stats?.active_alerts || 3}
+              value={stats?.active_alerts || 0}
               prefix={<WarningOutlined style={{ color: '#faad14' }} />}
               valueStyle={{ color: '#faad14' }}
             />
@@ -175,7 +233,7 @@ function Dashboard() {
           <Card className="stat-card">
             <Statistic
               title="待处理干预"
-              value={stats?.pending_interventions || 2}
+              value={stats?.pending_interventions || 0}
               prefix={<ToolOutlined style={{ color: '#722ed1' }} />}
               valueStyle={{ color: '#722ed1' }}
             />
@@ -263,7 +321,9 @@ function Dashboard() {
                     description={item.location || '位置未设置'}
                   />
                   <div>
-                    <Tag className={`risk-tag risk-low`}>低风险</Tag>
+                    <Tag className={`risk-tag ${getRiskLevelClass(item.risk_level || 'low')}`}>
+                      {getRiskLevelText(item.risk_level || 'low')}
+                    </Tag>
                   </div>
                 </List.Item>
               )}
@@ -273,28 +333,6 @@ function Dashboard() {
       </Row>
     </div>
   )
-}
-
-function generateMockTempData() {
-  const data = []
-  const now = new Date()
-  for (let i = 24; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-    const value = 20 + Math.sin(i / 6) * 1.5 + Math.random() * 0.5
-    data.push([time, value.toFixed(1)])
-  }
-  return data
-}
-
-function generateMockHumData() {
-  const data = []
-  const now = new Date()
-  for (let i = 24; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-    const value = 50 + Math.cos(i / 8) * 3 + Math.random() * 1
-    data.push([time, value.toFixed(1)])
-  }
-  return data
 }
 
 export default Dashboard
