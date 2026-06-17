@@ -51,7 +51,7 @@ async def startup_event():
 
     try:
         from app.database import engine, Base
-        from app.models import User, Showcase, Sensor, SensorReading, Alert, Intervention, InterventionStrategy, ShowcaseProfile, DispositionRecord, TrendAnalysis
+        from app.models import User, Showcase, Sensor, SensorReading, Alert, Intervention, InterventionStrategy, ShowcaseProfile, DispositionRecord, TrendAnalysis, strategy_user
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created/verified")
 

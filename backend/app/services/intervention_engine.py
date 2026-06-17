@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from app.models import InterventionStrategy, Alert, Showcase, Sensor
+from app.models import InterventionStrategy, Alert, Showcase, Sensor, User, Intervention, DispositionRecord, strategy_user
 import json
 import logging
 
@@ -18,6 +18,78 @@ class InterventionEngine:
         if severity_level:
             query = query.filter(InterventionStrategy.severity_level == severity_level)
         return query.all()
+
+    @staticmethod
+    def get_round_robin_user(db: Session, strategy: InterventionStrategy) -> Optional[User]:
+        assigned_users = db.query(User).join(
+            strategy_user, User.id == strategy_user.c.user_id
+        ).filter(
+            strategy_user.c.strategy_id == strategy.id,
+            User.status == "active"
+        ).all()
+
+        if not assigned_users:
+            return None
+
+        if strategy.last_assigned_user_id is None:
+            next_user = assigned_users[0]
+        else:
+            current_idx = -1
+            for i, u in enumerate(assigned_users):
+                if u.id == strategy.last_assigned_user_id:
+                    current_idx = i
+                    break
+            next_idx = (current_idx + 1) % len(assigned_users)
+            next_user = assigned_users[next_idx]
+
+        strategy.last_assigned_user_id = next_user.id
+        db.commit()
+        return next_user
+
+    @staticmethod
+    def auto_create_intervention_from_strategy(
+        db: Session, strategy: InterventionStrategy, alert: Alert, sensor: Sensor
+    ) -> Optional[Intervention]:
+        assigned_user = InterventionEngine.get_round_robin_user(db, strategy)
+        operator_name = None
+        operator_id = None
+        if assigned_user:
+            operator_name = assigned_user.real_name or assigned_user.username
+            operator_id = assigned_user.id
+
+        intervention = Intervention(
+            showcase_id=alert.showcase_id,
+            alert_id=alert.id,
+            strategy_id=strategy.id,
+            action_type=strategy.severity_level or "medium",
+            description=f"自动干预: 策略[{strategy.name}] - {alert.message}",
+            operator=operator_name or "系统自动",
+            operator_id=operator_id,
+            status="pending",
+        )
+        db.add(intervention)
+        db.commit()
+        db.refresh(intervention)
+
+        if intervention.showcase_id:
+            disposition = DispositionRecord(
+                intervention_id=intervention.id,
+                alert_id=alert.id,
+                showcase_id=intervention.showcase_id,
+                operator=operator_name or "系统自动",
+                action_type="create_intervention",
+                details=f"策略自动创建干预: {intervention.description}",
+                before_status="none",
+                after_status="pending"
+            )
+            db.add(disposition)
+            db.commit()
+
+        logger.info(
+            f"Auto-created intervention {intervention.id} from strategy {strategy.name}, "
+            f"assigned to user {operator_name}"
+        )
+        return intervention
 
     @staticmethod
     def match_strategies_for_alert(db: Session, alert: Alert, sensor: Sensor) -> List[Dict[str, Any]]:
@@ -72,6 +144,10 @@ class InterventionEngine:
                     confidence += 0.2
                     match_reasons.append("震动相关策略")
 
+            if strategy.sensor_type and strategy.sensor_type == sensor.sensor_type:
+                confidence += 0.3
+                match_reasons.append("传感器类型匹配")
+
             action_steps = []
             if strategy.action_steps:
                 try:
@@ -80,6 +156,10 @@ class InterventionEngine:
                     action_steps = [strategy.action_steps]
 
             if confidence > 0:
+                assigned_users = db.query(User).join(
+                    strategy_user, User.id == strategy_user.c.user_id
+                ).filter(strategy_user.c.strategy_id == strategy.id).all()
+
                 recommendations.append({
                     "strategy_id": strategy.id,
                     "strategy_name": strategy.name,
@@ -90,7 +170,14 @@ class InterventionEngine:
                     "estimated_duration": str(strategy.estimated_duration) if strategy.estimated_duration else None,
                     "action_steps": action_steps,
                     "confidence": min(confidence, 1.0),
-                    "match_reasons": match_reasons
+                    "match_reasons": match_reasons,
+                    "sensor_type": strategy.sensor_type,
+                    "condition_type": strategy.condition_type,
+                    "threshold_value": strategy.threshold_value,
+                    "normal_value": strategy.normal_value,
+                    "duration_minutes": strategy.duration_minutes,
+                    "assigned_user_ids": [u.id for u in assigned_users],
+                    "assigned_user_names": [u.real_name or u.username for u in assigned_users],
                 })
 
         recommendations.sort(key=lambda x: x["confidence"], reverse=True)
@@ -116,6 +203,10 @@ class InterventionEngine:
                 except (json.JSONDecodeError, TypeError):
                     action_steps = [strategy.action_steps]
 
+            assigned_users = db.query(User).join(
+                strategy_user, User.id == strategy_user.c.user_id
+            ).filter(strategy_user.c.strategy_id == strategy.id).all()
+
             result.append({
                 "strategy_id": strategy.id,
                 "strategy_name": strategy.name,
@@ -126,7 +217,14 @@ class InterventionEngine:
                 "estimated_duration": str(strategy.estimated_duration) if strategy.estimated_duration else None,
                 "action_steps": action_steps,
                 "confidence": 0.6,
-                "match_reasons": ["预防性维护策略"]
+                "match_reasons": ["预防性维护策略"],
+                "sensor_type": strategy.sensor_type,
+                "condition_type": strategy.condition_type,
+                "threshold_value": strategy.threshold_value,
+                "normal_value": strategy.normal_value,
+                "duration_minutes": strategy.duration_minutes,
+                "assigned_user_ids": [u.id for u in assigned_users],
+                "assigned_user_names": [u.real_name or u.username for u in assigned_users],
             })
 
         return result
@@ -151,6 +249,60 @@ class InterventionEngine:
             "recommendations": recommendations,
             "total_count": len(recommendations)
         }
+
+    @staticmethod
+    def check_strategies_and_create_interventions(db: Session, sensor: Sensor, value: float, alert: Alert):
+        strategies = db.query(InterventionStrategy).filter(
+            InterventionStrategy.is_active == True,
+            InterventionStrategy.sensor_type == sensor.sensor_type
+        ).all()
+
+        for strategy in strategies:
+            if not strategy.condition_type or strategy.threshold_value is None:
+                continue
+
+            condition_met = False
+            if strategy.condition_type == "greater_than" and value > strategy.threshold_value:
+                condition_met = True
+            elif strategy.condition_type == "less_than" and value < strategy.threshold_value:
+                condition_met = True
+
+            if not condition_met:
+                continue
+
+            if strategy.duration_minutes and strategy.duration_minutes > 0:
+                from datetime import datetime, timedelta
+                from app.models import SensorReading
+                cutoff = datetime.utcnow() - timedelta(minutes=strategy.duration_minutes)
+                readings = db.query(SensorReading).filter(
+                    SensorReading.sensor_id == sensor.id,
+                    SensorReading.time >= cutoff
+                ).order_by(SensorReading.time.desc()).limit(strategy.duration_minutes * 2).all()
+
+                if len(readings) < 2:
+                    continue
+
+                all_match = True
+                for reading in readings:
+                    if strategy.condition_type == "greater_than" and reading.value <= strategy.threshold_value:
+                        all_match = False
+                        break
+                    elif strategy.condition_type == "less_than" and reading.value >= strategy.threshold_value:
+                        all_match = False
+                        break
+
+                if not all_match:
+                    continue
+
+            existing = db.query(Intervention).filter(
+                Intervention.strategy_id == strategy.id,
+                Intervention.alert_id == alert.id,
+                Intervention.status.in_(["pending", "in_progress"])
+            ).first()
+            if existing:
+                continue
+
+            InterventionEngine.auto_create_intervention_from_strategy(db, strategy, alert, sensor)
 
 
 intervention_engine = InterventionEngine()

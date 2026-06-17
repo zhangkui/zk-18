@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timedelta
 from app.database import get_db
-from app.models import DispositionRecord, Showcase, Alert, Intervention
+from app.models import DispositionRecord, Showcase, Alert, Intervention, User
 from app.schemas import DispositionRecord as DispositionSchema, DispositionRecordCreate
 from app.services.profiler import trend_analyzer
+from app.auth import get_current_user
 
 router = APIRouter()
 
@@ -17,9 +18,14 @@ def get_dispositions(
     action_type: Optional[str] = None,
     operator: Optional[str] = None,
     limit: int = Query(50, le=500),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     query = db.query(DispositionRecord)
+
+    if current_user.role != "admin":
+        operator_name = current_user.real_name or current_user.username
+        query = query.filter(DispositionRecord.operator == operator_name)
 
     if showcase_id:
         query = query.filter(DispositionRecord.showcase_id == showcase_id)
@@ -171,26 +177,34 @@ def get_trends_summary(
 
 
 @router.get("/dispositions/summary")
-def get_dispositions_summary(db: Session = Depends(get_db)):
+def get_dispositions_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     from sqlalchemy import func
+
+    query = db.query(DispositionRecord)
+    if current_user.role != "admin":
+        operator_name = current_user.real_name or current_user.username
+        query = query.filter(DispositionRecord.operator == operator_name)
 
     last_7_days = datetime.utcnow() - timedelta(days=7)
     last_30_days = datetime.utcnow() - timedelta(days=30)
 
-    total_count = db.query(DispositionRecord).count()
-    last_7d_count = db.query(DispositionRecord).filter(
+    total_count = query.count()
+    last_7d_count = query.filter(
         DispositionRecord.created_at >= last_7_days
     ).count()
-    last_30d_count = db.query(DispositionRecord).filter(
+    last_30d_count = query.filter(
         DispositionRecord.created_at >= last_30_days
     ).count()
 
-    action_types = db.query(
+    action_types = query.with_entities(
         DispositionRecord.action_type,
         func.count(DispositionRecord.id)
     ).group_by(DispositionRecord.action_type).all()
 
-    operators = db.query(
+    operators = query.with_entities(
         DispositionRecord.operator,
         func.count(DispositionRecord.id)
     ).group_by(DispositionRecord.operator).order_by(

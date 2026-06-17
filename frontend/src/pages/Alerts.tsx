@@ -173,6 +173,13 @@ function Alerts() {
       render: (status: string) => getStatusTag(status),
     },
     {
+      title: '负责人',
+      dataIndex: 'assigned_user_name',
+      key: 'assigned_user_name',
+      width: 100,
+      render: (name: string) => name || '-',
+    },
+    {
       title: '触发时间',
       dataIndex: 'triggered_at',
       key: 'triggered_at',

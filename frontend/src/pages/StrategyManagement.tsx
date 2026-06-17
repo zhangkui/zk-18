@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Table, Button, Space, Modal, Form, Input, Select, Tag, message, Popconfirm, Card, Switch } from 'antd';
+import { Table, Button, Space, Modal, Form, Input, Select, Tag, message, Popconfirm, Card, Switch, InputNumber, Row, Col } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
-import { interventionAPI } from '@/services/api';
+import { interventionAPI, userAPI } from '@/services/api';
 import dayjs from 'dayjs';
 
 const severityMap: Record<string, { label: string; color: string }> = {
@@ -17,8 +17,14 @@ const sensorTypeMap: Record<string, string> = {
   vibration: '震动',
 };
 
+const conditionTypeMap: Record<string, string> = {
+  greater_than: '大于',
+  less_than: '小于',
+};
+
 const StrategyManagement = () => {
   const [strategies, setStrategies] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingRecord, setEditingRecord] = useState<any>(null);
@@ -39,13 +45,24 @@ const StrategyManagement = () => {
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const res = await userAPI.getAll();
+      setUsers(res.data || []);
+    } catch {
+      message.error('获取用户列表失败');
+    }
+  };
+
   useEffect(() => {
     fetchStrategies();
+    fetchUsers();
   }, []);
 
   const handleAdd = () => {
     setEditingRecord(null);
     form.resetFields();
+    form.setFieldsValue({ is_active: true });
     setModalVisible(true);
   };
 
@@ -54,6 +71,7 @@ const StrategyManagement = () => {
     form.setFieldsValue({
       ...record,
       applicable_sensor_types: record.applicable_sensor_types || [],
+      assigned_user_ids: record.assigned_user_ids || [],
     });
     setModalVisible(true);
   };
@@ -118,7 +136,21 @@ const StrategyManagement = () => {
     { title: '策略编号', dataIndex: 'code', key: 'code' },
     { title: '策略名称', dataIndex: 'name', key: 'name' },
     { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
-    { title: '触发条件', dataIndex: 'trigger_condition', key: 'trigger_condition', ellipsis: true },
+    {
+      title: '规则',
+      key: 'rule',
+      width: 200,
+      render: (_: any, record: any) => {
+        if (!record.sensor_type && !record.condition_type && record.threshold_value === null) return '-';
+        const parts: string[] = [];
+        if (record.sensor_type) parts.push(sensorTypeMap[record.sensor_type] || record.sensor_type);
+        if (record.condition_type) parts.push(conditionTypeMap[record.condition_type] || record.condition_type);
+        if (record.threshold_value !== null && record.threshold_value !== undefined) parts.push(`${record.threshold_value}`);
+        if (record.normal_value !== null && record.normal_value !== undefined) parts.push(`正常值:${record.normal_value}`);
+        if (record.duration_minutes) parts.push(`持续${record.duration_minutes}分钟`);
+        return parts.join(' ') || '-';
+      },
+    },
     {
       title: '适用类型',
       dataIndex: 'applicable_sensor_types',
@@ -135,6 +167,15 @@ const StrategyManagement = () => {
       render: (level: string) => {
         const info = severityMap[level];
         return info ? <Tag color={info.color}>{info.label}</Tag> : level;
+      },
+    },
+    {
+      title: '负责人',
+      dataIndex: 'assigned_user_names',
+      key: 'assigned_user_names',
+      render: (names: string[]) => {
+        if (!names || names.length === 0) return '-';
+        return names.map((n, i) => <Tag key={i} color="blue">{n}</Tag>);
       },
     },
     {
@@ -212,6 +253,7 @@ const StrategyManagement = () => {
         dataSource={filteredStrategies}
         loading={loading}
         pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+        scroll={{ x: 1200 }}
       />
 
       <Modal
@@ -220,41 +262,105 @@ const StrategyManagement = () => {
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
         destroyOnClose
-        width={600}
+        width={700}
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="code" label="策略编号" rules={[{ required: true, message: '请输入策略编号' }]}>
-            <Input />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label="策略名称" rules={[{ required: true, message: '请输入策略名称' }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="code" label="策略编号" rules={[{ required: true, message: '请输入策略编号' }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} />
+            <Input.TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="trigger_condition" label="触发条件" rules={[{ required: true, message: '请输入触发条件' }]}>
-            <Input.TextArea rows={3} />
+
+          <Card title="触发规则" size="small" style={{ marginBottom: 16 }}>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="sensor_type" label="传感器类型">
+                  <Select placeholder="请选择" allowClear>
+                    <Select.Option value="temperature">温度</Select.Option>
+                    <Select.Option value="humidity">湿度</Select.Option>
+                    <Select.Option value="light">光照</Select.Option>
+                    <Select.Option value="vibration">震动</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="condition_type" label="条件类型">
+                  <Select placeholder="请选择" allowClear>
+                    <Select.Option value="greater_than">大于</Select.Option>
+                    <Select.Option value="less_than">小于</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="threshold_value" label="阈值">
+                  <InputNumber style={{ width: '100%' }} placeholder="如: 30" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="normal_value" label="正常值">
+                  <InputNumber style={{ width: '100%' }} placeholder="如: 22" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="duration_minutes" label="持续分钟数">
+                  <InputNumber style={{ width: '100%' }} placeholder="如: 5" min={1} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
+          <Form.Item name="trigger_condition" label="触发条件描述">
+            <Input.TextArea rows={2} />
           </Form.Item>
           <Form.Item name="action_steps" label="干预步骤">
-            <Input.TextArea rows={3} />
+            <Input.TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="applicable_sensor_types" label="适用传感器类型" rules={[{ required: true, message: '请选择传感器类型' }]}>
-            <Select mode="multiple" placeholder="请选择传感器类型">
-              <Select.Option value="temperature">温度</Select.Option>
-              <Select.Option value="humidity">湿度</Select.Option>
-              <Select.Option value="light">光照</Select.Option>
-              <Select.Option value="vibration">震动</Select.Option>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="applicable_sensor_types" label="适用传感器类型" rules={[{ required: true, message: '请选择传感器类型' }]}>
+                <Select mode="multiple" placeholder="请选择传感器类型">
+                  <Select.Option value="temperature">温度</Select.Option>
+                  <Select.Option value="humidity">湿度</Select.Option>
+                  <Select.Option value="light">光照</Select.Option>
+                  <Select.Option value="vibration">震动</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="severity_level" label="严重级别" rules={[{ required: true, message: '请选择严重级别' }]}>
+                <Select placeholder="请选择严重级别">
+                  <Select.Option value="low">低</Select.Option>
+                  <Select.Option value="medium">中</Select.Option>
+                  <Select.Option value="high">高</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="is_active" label="启用状态" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="assigned_user_ids" label="关联干预人员（轮流分配）">
+            <Select mode="multiple" placeholder="请选择干预人员">
+              {users.map((u: any) => (
+                <Select.Option key={u.id} value={u.id}>
+                  {u.real_name || u.username} ({u.role === 'admin' ? '管理员' : '操作员'})
+                </Select.Option>
+              ))}
             </Select>
-          </Form.Item>
-          <Form.Item name="severity_level" label="严重级别" rules={[{ required: true, message: '请选择严重级别' }]}>
-            <Select placeholder="请选择严重级别">
-              <Select.Option value="low">低</Select.Option>
-              <Select.Option value="medium">中</Select.Option>
-              <Select.Option value="high">高</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="is_active" label="启用状态" valuePropName="checked">
-            <Switch />
           </Form.Item>
         </Form>
       </Modal>

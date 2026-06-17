@@ -1,8 +1,15 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean, ARRAY, Interval, Date, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean, ARRAY, Interval, Date, Enum, Table
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
 import enum
+
+strategy_user = Table(
+    "strategy_user",
+    Base.metadata,
+    Column("strategy_id", Integer, ForeignKey("intervention_strategy.id"), primary_key=True),
+    Column("user_id", Integer, ForeignKey("user.id"), primary_key=True),
+)
 
 
 class User(Base):
@@ -18,6 +25,10 @@ class User(Base):
     status = Column(String(20), default="active")
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    assigned_alerts = relationship("Alert", back_populates="assigned_user", foreign_keys="Alert.assigned_user_id")
+    assigned_interventions = relationship("Intervention", back_populates="operator_user", foreign_keys="Intervention.operator_id")
+    strategies = relationship("InterventionStrategy", secondary=strategy_user, back_populates="assigned_users")
 
 
 class Showcase(Base):
@@ -88,11 +99,13 @@ class Alert(Base):
     resolved_at = Column(DateTime(timezone=True))
     resolved_by = Column(String(50))
     resolution_note = Column(Text)
+    assigned_user_id = Column(Integer, ForeignKey("user.id"))
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     sensor = relationship("Sensor", back_populates="alerts")
     showcase = relationship("Showcase", back_populates="alerts")
     dispositions = relationship("DispositionRecord", back_populates="alert")
+    assigned_user = relationship("User", back_populates="assigned_alerts", foreign_keys=[assigned_user_id])
 
 
 class Intervention(Base):
@@ -105,6 +118,7 @@ class Intervention(Base):
     action_type = Column(String(50), nullable=False)
     description = Column(Text, nullable=False)
     operator = Column(String(50))
+    operator_id = Column(Integer, ForeignKey("user.id"))
     status = Column(String(20), default="pending")
     scheduled_at = Column(DateTime(timezone=True))
     started_at = Column(DateTime(timezone=True))
@@ -115,6 +129,7 @@ class Intervention(Base):
 
     showcase = relationship("Showcase", back_populates="interventions")
     dispositions = relationship("DispositionRecord", back_populates="intervention")
+    operator_user = relationship("User", back_populates="assigned_interventions", foreign_keys=[operator_id])
 
 
 class InterventionStrategy(Base):
@@ -130,8 +145,17 @@ class InterventionStrategy(Base):
     severity_level = Column(String(20))
     estimated_duration = Column(Interval)
     is_active = Column(Boolean, default=True)
+    sensor_type = Column(String(30))
+    condition_type = Column(String(20))
+    threshold_value = Column(Float)
+    normal_value = Column(Float)
+    duration_minutes = Column(Integer)
+    last_assigned_user_id = Column(Integer, ForeignKey("user.id"))
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    assigned_users = relationship("User", secondary=strategy_user, back_populates="strategies")
+    last_assigned_user = relationship("User", foreign_keys=[last_assigned_user_id])
 
 
 class ShowcaseProfile(Base):

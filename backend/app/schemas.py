@@ -95,6 +95,7 @@ class AlertBase(BaseModel):
     threshold: Optional[float] = None
     status: Optional[str] = "pending"
     triggered_at: datetime
+    assigned_user_id: Optional[int] = None
 
 
 class AlertCreate(AlertBase):
@@ -106,6 +107,7 @@ class AlertUpdate(BaseModel):
     acknowledged_by: Optional[str] = None
     resolved_by: Optional[str] = None
     resolution_note: Optional[str] = None
+    assigned_user_id: Optional[int] = None
 
 
 class Alert(AlertBase):
@@ -113,6 +115,7 @@ class Alert(AlertBase):
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     created_at: datetime
+    assigned_user_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -125,6 +128,7 @@ class InterventionBase(BaseModel):
     action_type: str
     description: str
     operator: Optional[str] = None
+    operator_id: Optional[int] = None
     status: Optional[str] = "pending"
     scheduled_at: Optional[datetime] = None
 
@@ -136,6 +140,7 @@ class InterventionCreate(InterventionBase):
 class InterventionUpdate(BaseModel):
     status: Optional[str] = None
     operator: Optional[str] = None
+    operator_id: Optional[int] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     result_note: Optional[str] = None
@@ -148,6 +153,7 @@ class Intervention(InterventionBase):
     result_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    operator_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -162,6 +168,12 @@ class InterventionStrategyBase(BaseModel):
     applicable_sensor_types: Optional[List[str]] = None
     severity_level: Optional[str] = None
     is_active: Optional[bool] = True
+    sensor_type: Optional[str] = None
+    condition_type: Optional[str] = None
+    threshold_value: Optional[float] = None
+    normal_value: Optional[float] = None
+    duration_minutes: Optional[int] = None
+    assigned_user_ids: Optional[List[int]] = None
 
 
 class InterventionStrategyCreate(InterventionStrategyBase):
@@ -177,12 +189,19 @@ class InterventionStrategyUpdate(BaseModel):
     applicable_sensor_types: Optional[List[str]] = None
     severity_level: Optional[str] = None
     is_active: Optional[bool] = None
+    sensor_type: Optional[str] = None
+    condition_type: Optional[str] = None
+    threshold_value: Optional[float] = None
+    normal_value: Optional[float] = None
+    duration_minutes: Optional[int] = None
+    assigned_user_ids: Optional[List[int]] = None
 
 
 class InterventionStrategy(InterventionStrategyBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    assigned_user_names: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

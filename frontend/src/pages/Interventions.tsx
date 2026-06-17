@@ -23,7 +23,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { interventionAPI, showcaseAPI } from '@/services/api'
+import { interventionAPI, showcaseAPI, userAPI } from '@/services/api'
 import dayjs from 'dayjs'
 
 const { Option } = Select
@@ -34,6 +34,7 @@ function Interventions() {
   const [interventions, setInterventions] = useState<any[]>([])
   const [strategies, setStrategies] = useState<any[]>([])
   const [showcases, setShowcases] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
   const [createModal, setCreateModal] = useState(false)
@@ -49,14 +50,16 @@ function Interventions() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [interventionsRes, strategiesRes, showcasesRes] = await Promise.all([
+      const [interventionsRes, strategiesRes, showcasesRes, usersRes] = await Promise.all([
         interventionAPI.getAll({ status: statusFilter, limit: 50 }),
         interventionAPI.getStrategies(),
         showcaseAPI.getAll(),
+        userAPI.getAll(),
       ])
       setInterventions(interventionsRes.data)
       setStrategies(strategiesRes.data)
       setShowcases(showcasesRes.data)
+      setUsers(usersRes.data)
     } catch (error) {
       console.error('加载干预数据失败:', error)
     } finally {
@@ -172,9 +175,9 @@ function Interventions() {
     },
     {
       title: '操作人员',
-      dataIndex: 'operator',
       key: 'operator',
       width: 100,
+      render: (_: any, record: any) => record.operator_name || record.operator || '-',
     },
     {
       title: '创建时间',
@@ -304,6 +307,11 @@ function Interventions() {
                       <div style={{ color: '#999', fontSize: 12 }}>
                         适用传感器: {strategy.applicable_sensor_types?.join(', ') || '全部'}
                       </div>
+                      {strategy.assigned_user_names && strategy.assigned_user_names.length > 0 && (
+                        <div style={{ color: '#1890ff', fontSize: 12, marginTop: 4 }}>
+                          负责人: {strategy.assigned_user_names.join(', ')}
+                        </div>
+                      )}
                     </div>
                   }
                 />
@@ -349,8 +357,12 @@ function Interventions() {
           <Form.Item name="scheduled_at" label="计划时间">
             <DatePicker showTime style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="operator" label="操作人员">
-            <Input placeholder="请输入操作人员姓名" defaultValue="系统管理员" />
+          <Form.Item name="operator_id" label="操作人员">
+            <Select placeholder="请选择操作人员" allowClear>
+              {users.map((u) => (
+                <Option key={u.id} value={u.id}>{u.real_name || u.username}</Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item>
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>

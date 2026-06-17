@@ -6,6 +6,7 @@ from app.database import SessionLocal
 from app.models import Sensor, SensorReading, Alert
 from app.influx_db import influxdb_service
 from app.services.anomaly_detector import anomaly_detector
+from app.services.intervention_engine import intervention_engine
 import threading
 import time
 import logging
@@ -120,6 +121,32 @@ class MQTTService:
             db.commit()
 
             self._record_alert_sent(sensor.id, alert_type)
+
+            try:
+                from app.models import User
+                non_admin_users = db.query(User).filter(
+                    User.role != "admin",
+                    User.status == "active"
+                ).order_by(User.id).all()
+                if non_admin_users:
+                    pending_counts = {}
+                    for u in non_admin_users:
+                        cnt = db.query(Alert).filter(
+                            Alert.assigned_user_id == u.id,
+                            Alert.status.in_(["pending", "acknowledged"])
+                        ).count()
+                        pending_counts[u.id] = cnt
+                    min_user = min(non_admin_users, key=lambda u: pending_counts[u.id])
+                    alert.assigned_user_id = min_user.id
+                    db.commit()
+                    logger.info(f"Auto-assigned alert {alert.id} to user {min_user.username}")
+            except Exception as e:
+                logger.error(f"Error auto-assigning alert: {e}")
+
+            try:
+                intervention_engine.check_strategies_and_create_interventions(db, sensor, value, alert)
+            except Exception as e:
+                logger.error(f"Error checking strategies for auto-intervention: {e}")
 
             logger.warning(
                 f"Alert created: sensor={sensor.code}, type={alert_type}, "
