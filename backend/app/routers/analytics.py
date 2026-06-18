@@ -44,8 +44,15 @@ def get_dispositions(
 
 
 @router.post("/dispositions", response_model=DispositionSchema)
-def create_disposition(disposition_data: DispositionRecordCreate, db: Session = Depends(get_db)):
-    disposition = DispositionRecord(**disposition_data.dict())
+def create_disposition(
+    disposition_data: DispositionRecordCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    disposition_dict = disposition_data.dict()
+    if "operator" not in disposition_dict or not disposition_dict["operator"]:
+        disposition_dict["operator"] = current_user.real_name or current_user.username
+    disposition = DispositionRecord(**disposition_dict)
     db.add(disposition)
     db.commit()
     db.refresh(disposition)
@@ -53,8 +60,16 @@ def create_disposition(disposition_data: DispositionRecordCreate, db: Session = 
 
 
 @router.get("/dispositions/{disposition_id}", response_model=DispositionSchema)
-def get_disposition_detail(disposition_id: int, db: Session = Depends(get_db)):
-    disposition = db.query(DispositionRecord).filter(DispositionRecord.id == disposition_id).first()
+def get_disposition_detail(
+    disposition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(DispositionRecord).filter(DispositionRecord.id == disposition_id)
+    if current_user.role != "admin":
+        operator_name = current_user.real_name or current_user.username
+        query = query.filter(DispositionRecord.operator == operator_name)
+    disposition = query.first()
     if not disposition:
         raise HTTPException(status_code=404, detail="处置记录不存在")
     return disposition
@@ -64,15 +79,21 @@ def get_disposition_detail(disposition_id: int, db: Session = Depends(get_db)):
 def get_showcase_dispositions(
     showcase_id: int,
     limit: int = Query(50, le=500),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
     if not showcase:
         raise HTTPException(status_code=404, detail="展柜不存在")
 
-    dispositions = db.query(DispositionRecord).filter(
+    query = db.query(DispositionRecord).filter(
         DispositionRecord.showcase_id == showcase_id
-    ).order_by(DispositionRecord.created_at.desc()).limit(limit).all()
+    )
+    if current_user.role != "admin":
+        operator_name = current_user.real_name or current_user.username
+        query = query.filter(DispositionRecord.operator == operator_name)
+
+    dispositions = query.order_by(DispositionRecord.created_at.desc()).limit(limit).all()
 
     return {
         "showcase_id": showcase_id,
@@ -88,7 +109,8 @@ def get_showcase_trends(
     sensor_type: Optional[str] = None,
     period: Optional[str] = None,
     limit: int = Query(10, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
     if not showcase:
@@ -112,7 +134,8 @@ def analyze_trend(
     start_date: date,
     end_date: date,
     period: str = "monthly",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     showcase = db.query(Showcase).filter(Showcase.id == showcase_id).first()
     if not showcase:
@@ -131,7 +154,8 @@ def analyze_trend(
 @router.get("/trends/summary")
 def get_trends_summary(
     showcase_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     from app.models import TrendAnalysis
     from sqlalchemy import func
@@ -224,7 +248,10 @@ def get_dispositions_summary(
 
 
 @router.post("/trends/auto-generate")
-def auto_generate_trends(db: Session = Depends(get_db)):
+def auto_generate_trends(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     showcases = db.query(Showcase).all()
     if not showcases:
         raise HTTPException(status_code=400, detail="没有可用的展柜数据")
@@ -308,13 +335,16 @@ def auto_generate_trends(db: Session = Depends(get_db)):
 
 
 @router.post("/dispositions/auto-generate")
-def auto_generate_dispositions(db: Session = Depends(get_db)):
+def auto_generate_dispositions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     alerts = db.query(Alert).order_by(Alert.triggered_at.desc()).all()
     if not alerts:
         raise HTTPException(status_code=400, detail="没有可用的告警数据")
 
     generated = 0
-    operators = db.query(User).filter(User.status == "active").all()
+    current_operator = current_user.real_name or current_user.username
 
     for alert in alerts:
         existing = db.query(DispositionRecord).filter(
@@ -323,8 +353,7 @@ def auto_generate_dispositions(db: Session = Depends(get_db)):
         if existing:
             continue
 
-        operator = operators[generated % len(operators)] if operators else None
-        operator_name = (operator.real_name or operator.username) if operator else "系统管理员"
+        operator_name = current_operator
 
         ack_time = alert.triggered_at + timedelta(minutes=random_int(1, 60))
         resolve_time = ack_time + timedelta(minutes=random_int(10, 180))
@@ -368,7 +397,8 @@ def auto_generate_dispositions(db: Session = Depends(get_db)):
 
     return {
         "message": f"自动生成完成，共生成 {generated} 条处置记录",
-        "generated_count": generated
+        "generated_count": generated,
+        "operator": current_operator
     }
 
 
