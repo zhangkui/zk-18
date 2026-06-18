@@ -59,6 +59,118 @@ def create_disposition(
     return disposition
 
 
+@router.get("/dispositions/summary")
+def get_dispositions_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import func
+
+    query = db.query(DispositionRecord)
+    if current_user.role != "admin":
+        operator_name = current_user.real_name or current_user.username
+        query = query.filter(DispositionRecord.operator == operator_name)
+
+    last_7_days = datetime.utcnow() - timedelta(days=7)
+    last_30_days = datetime.utcnow() - timedelta(days=30)
+
+    total_count = query.count()
+    last_7d_count = query.filter(
+        DispositionRecord.created_at >= last_7_days
+    ).count()
+    last_30d_count = query.filter(
+        DispositionRecord.created_at >= last_30_days
+    ).count()
+
+    action_types = query.with_entities(
+        DispositionRecord.action_type,
+        func.count(DispositionRecord.id)
+    ).group_by(DispositionRecord.action_type).all()
+
+    operators = query.with_entities(
+        DispositionRecord.operator,
+        func.count(DispositionRecord.id)
+    ).group_by(DispositionRecord.operator).order_by(
+        func.count(DispositionRecord.id).desc()
+    ).limit(10).all()
+
+    return {
+        "total_count": total_count,
+        "last_7_days_count": last_7d_count,
+        "last_30_days_count": last_30d_count,
+        "by_action_type": {at: cnt for at, cnt in action_types},
+        "top_operators": [{"operator": op, "count": cnt} for op, cnt in operators]
+    }
+
+
+@router.post("/dispositions/auto-generate")
+def auto_generate_dispositions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    alerts = db.query(Alert).order_by(Alert.triggered_at.desc()).all()
+    if not alerts:
+        raise HTTPException(status_code=400, detail="没有可用的告警数据")
+
+    generated = 0
+    current_operator = current_user.real_name or current_user.username
+
+    for alert in alerts:
+        existing = db.query(DispositionRecord).filter(
+            DispositionRecord.alert_id == alert.id
+        ).first()
+        if existing:
+            continue
+
+        operator_name = current_operator
+
+        ack_time = alert.triggered_at + timedelta(minutes=random_int(1, 60))
+        resolve_time = ack_time + timedelta(minutes=random_int(10, 180))
+
+        disposition = DispositionRecord(
+            alert_id=alert.id,
+            showcase_id=alert.showcase_id,
+            operator=operator_name,
+            action_type="acknowledge",
+            details=f"确认告警: {alert.message}",
+            before_status="pending",
+            after_status="acknowledged",
+            created_at=ack_time
+        )
+        db.add(disposition)
+        generated += 1
+
+        resolve_note = random_resolve_note(alert.alert_type)
+        disposition2 = DispositionRecord(
+            alert_id=alert.id,
+            showcase_id=alert.showcase_id,
+            operator=operator_name,
+            action_type="resolve",
+            details=f"处理完成: {resolve_note}",
+            before_status="acknowledged",
+            after_status="resolved",
+            created_at=resolve_time
+        )
+        db.add(disposition2)
+        generated += 1
+
+        if alert.status in ["pending", "acknowledged"]:
+            alert.status = "resolved"
+            alert.acknowledged_at = ack_time
+            alert.acknowledged_by = operator_name
+            alert.resolved_at = resolve_time
+            alert.resolved_by = operator_name
+            alert.resolution_note = resolve_note
+
+    db.commit()
+
+    return {
+        "message": f"自动生成完成，共生成 {generated} 条处置记录",
+        "generated_count": generated,
+        "operator": current_operator
+    }
+
+
 @router.get("/dispositions/{disposition_id}", response_model=DispositionSchema)
 def get_disposition_detail(
     disposition_id: int,
@@ -100,6 +212,57 @@ def get_showcase_dispositions(
         "showcase_name": showcase.name,
         "total_count": len(dispositions),
         "dispositions": dispositions
+    }
+
+
+@router.get("/trends/summary")
+def get_trends_summary(
+    showcase_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from sqlalchemy import func
+
+    query = db.query(TrendAnalysis)
+    if showcase_id:
+        query = query.filter(TrendAnalysis.showcase_id == showcase_id)
+
+    total_analyses = query.count()
+
+    rising_count = query.filter(TrendAnalysis.trend_direction == "rising").count()
+    falling_count = query.filter(TrendAnalysis.trend_direction == "falling").count()
+    stable_count = query.filter(TrendAnalysis.trend_direction == "stable").count()
+
+    high_volatility = query.filter(TrendAnalysis.volatility > 0.1).count()
+
+    sensor_types = ["temperature", "humidity", "light", "vibration"]
+    by_sensor_type = {}
+    for st in sensor_types:
+        st_trends = db.query(TrendAnalysis).filter(TrendAnalysis.sensor_type == st)
+        if showcase_id:
+            st_trends = st_trends.filter(TrendAnalysis.showcase_id == showcase_id)
+
+        avg_volatility = st_trends.with_entities(
+            func.avg(TrendAnalysis.volatility)
+        ).scalar() or 0
+
+        avg_anomalies = st_trends.with_entities(
+            func.avg(TrendAnalysis.anomaly_count)
+        ).scalar() or 0
+
+        by_sensor_type[st] = {
+            "count": st_trends.count(),
+            "avg_volatility": float(avg_volatility),
+            "avg_anomaly_count": float(avg_anomalies)
+        }
+
+    return {
+        "total_analyses": total_analyses,
+        "rising": rising_count,
+        "falling": falling_count,
+        "stable": stable_count,
+        "high_volatility_count": high_volatility,
+        "by_sensor_type": by_sensor_type
     }
 
 
@@ -149,102 +312,6 @@ def analyze_trend(
         raise HTTPException(status_code=400, detail=result["error"])
 
     return result
-
-
-@router.get("/trends/summary")
-def get_trends_summary(
-    showcase_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    from app.models import TrendAnalysis
-    from sqlalchemy import func
-
-    query = db.query(TrendAnalysis)
-    if showcase_id:
-        query = query.filter(TrendAnalysis.showcase_id == showcase_id)
-
-    total_analyses = query.count()
-
-    rising_count = query.filter(TrendAnalysis.trend_direction == "rising").count()
-    falling_count = query.filter(TrendAnalysis.trend_direction == "falling").count()
-    stable_count = query.filter(TrendAnalysis.trend_direction == "stable").count()
-
-    high_volatility = query.filter(TrendAnalysis.volatility > 0.1).count()
-
-    sensor_types = ["temperature", "humidity", "light", "vibration"]
-    by_sensor_type = {}
-    for st in sensor_types:
-        st_trends = db.query(TrendAnalysis).filter(TrendAnalysis.sensor_type == st)
-        if showcase_id:
-            st_trends = st_trends.filter(TrendAnalysis.showcase_id == showcase_id)
-
-        avg_volatility = st_trends.with_entities(
-            func.avg(TrendAnalysis.volatility)
-        ).scalar() or 0
-
-        avg_anomalies = st_trends.with_entities(
-            func.avg(TrendAnalysis.anomaly_count)
-        ).scalar() or 0
-
-        by_sensor_type[st] = {
-            "count": st_trends.count(),
-            "avg_volatility": float(avg_volatility),
-            "avg_anomaly_count": float(avg_anomalies)
-        }
-
-    return {
-        "total_analyses": total_analyses,
-        "rising": rising_count,
-        "falling": falling_count,
-        "stable": stable_count,
-        "high_volatility_count": high_volatility,
-        "by_sensor_type": by_sensor_type
-    }
-
-
-@router.get("/dispositions/summary")
-def get_dispositions_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from sqlalchemy import func
-
-    query = db.query(DispositionRecord)
-    if current_user.role != "admin":
-        operator_name = current_user.real_name or current_user.username
-        query = query.filter(DispositionRecord.operator == operator_name)
-
-    last_7_days = datetime.utcnow() - timedelta(days=7)
-    last_30_days = datetime.utcnow() - timedelta(days=30)
-
-    total_count = query.count()
-    last_7d_count = query.filter(
-        DispositionRecord.created_at >= last_7_days
-    ).count()
-    last_30d_count = query.filter(
-        DispositionRecord.created_at >= last_30_days
-    ).count()
-
-    action_types = query.with_entities(
-        DispositionRecord.action_type,
-        func.count(DispositionRecord.id)
-    ).group_by(DispositionRecord.action_type).all()
-
-    operators = query.with_entities(
-        DispositionRecord.operator,
-        func.count(DispositionRecord.id)
-    ).group_by(DispositionRecord.operator).order_by(
-        func.count(DispositionRecord.id).desc()
-    ).limit(10).all()
-
-    return {
-        "total_count": total_count,
-        "last_7_days_count": last_7d_count,
-        "last_30_days_count": last_30d_count,
-        "by_action_type": {at: cnt for at, cnt in action_types},
-        "top_operators": [{"operator": op, "count": cnt} for op, cnt in operators]
-    }
 
 
 @router.post("/trends/auto-generate")
@@ -331,74 +398,6 @@ def auto_generate_trends(
         "message": f"自动生成完成，共生成 {generated} 条趋势分析记录",
         "generated_count": generated,
         "errors": errors
-    }
-
-
-@router.post("/dispositions/auto-generate")
-def auto_generate_dispositions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    alerts = db.query(Alert).order_by(Alert.triggered_at.desc()).all()
-    if not alerts:
-        raise HTTPException(status_code=400, detail="没有可用的告警数据")
-
-    generated = 0
-    current_operator = current_user.real_name or current_user.username
-
-    for alert in alerts:
-        existing = db.query(DispositionRecord).filter(
-            DispositionRecord.alert_id == alert.id
-        ).first()
-        if existing:
-            continue
-
-        operator_name = current_operator
-
-        ack_time = alert.triggered_at + timedelta(minutes=random_int(1, 60))
-        resolve_time = ack_time + timedelta(minutes=random_int(10, 180))
-
-        disposition = DispositionRecord(
-            alert_id=alert.id,
-            showcase_id=alert.showcase_id,
-            operator=operator_name,
-            action_type="acknowledge",
-            details=f"确认告警: {alert.message}",
-            before_status="pending",
-            after_status="acknowledged",
-            created_at=ack_time
-        )
-        db.add(disposition)
-        generated += 1
-
-        resolve_note = random_resolve_note(alert.alert_type)
-        disposition2 = DispositionRecord(
-            alert_id=alert.id,
-            showcase_id=alert.showcase_id,
-            operator=operator_name,
-            action_type="resolve",
-            details=f"处理完成: {resolve_note}",
-            before_status="acknowledged",
-            after_status="resolved",
-            created_at=resolve_time
-        )
-        db.add(disposition2)
-        generated += 1
-
-        if alert.status in ["pending", "acknowledged"]:
-            alert.status = "resolved"
-            alert.acknowledged_at = ack_time
-            alert.acknowledged_by = operator_name
-            alert.resolved_at = resolve_time
-            alert.resolved_by = operator_name
-            alert.resolution_note = resolve_note
-
-    db.commit()
-
-    return {
-        "message": f"自动生成完成，共生成 {generated} 条处置记录",
-        "generated_count": generated,
-        "operator": current_operator
     }
 
 
