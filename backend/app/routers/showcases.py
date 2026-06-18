@@ -94,13 +94,14 @@ def get_sensor_detail(sensor_id: int, db: Session = Depends(get_db)):
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
 def get_dashboard_stats(db: Session = Depends(get_db)):
-    from app.models import Alert, Intervention, ShowcaseProfile
+    from app.models import Alert, Intervention, ShowcaseProfile, SensorReading
 
-    total_showcases = db.query(func.count(Showcase.id)).scalar()
-    active_sensors = db.query(func.count(Sensor.id)).filter(Sensor.status == "active").scalar()
-    active_alerts = db.query(func.count(Alert.id)).filter(Alert.status.in_(["pending", "acknowledged"])).scalar()
-    pending_interventions = db.query(func.count(Intervention.id)).filter(Intervention.status == "pending").scalar()
-    high_risk_showcases = db.query(func.count(ShowcaseProfile.id)).filter(ShowcaseProfile.risk_level == "high").scalar()
+    total_showcases = db.query(func.count(Showcase.id)).scalar() or 0
+    online_showcases = db.query(func.count(Showcase.id)).filter(Showcase.status == "active").scalar() or 0
+    active_sensors = db.query(func.count(Sensor.id)).filter(Sensor.status == "active").scalar() or 0
+    active_alerts = db.query(func.count(Alert.id)).filter(Alert.status.in_(["pending", "acknowledged"])).scalar() or 0
+    pending_interventions = db.query(func.count(Intervention.id)).filter(Intervention.status == "pending").scalar() or 0
+    high_risk_showcases = db.query(func.count(ShowcaseProfile.id)).filter(ShowcaseProfile.risk_level == "high").scalar() or 0
 
     temp_sensor = db.query(Sensor).filter(Sensor.sensor_type == "temperature").first()
     hum_sensor = db.query(Sensor).filter(Sensor.sensor_type == "humidity").first()
@@ -109,7 +110,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     avg_hum = 50.0
 
     if temp_sensor:
-        from app.models import SensorReading
         latest_temp = db.query(SensorReading).filter(
             SensorReading.sensor_id == temp_sensor.id
         ).order_by(SensorReading.time.desc()).first()
@@ -117,7 +117,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             avg_temp = latest_temp.value
 
     if hum_sensor:
-        from app.models import SensorReading
         latest_hum = db.query(SensorReading).filter(
             SensorReading.sensor_id == hum_sensor.id
         ).order_by(SensorReading.time.desc()).first()
@@ -126,6 +125,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return DashboardStats(
         total_showcases=total_showcases,
+        online_showcases=online_showcases,
         active_sensors=active_sensors,
         active_alerts=active_alerts,
         pending_interventions=pending_interventions,

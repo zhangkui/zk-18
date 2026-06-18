@@ -64,15 +64,16 @@ def get_dispositions_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from sqlalchemy import func
+    from sqlalchemy import func, cast, Date as SqlDate
 
     query = db.query(DispositionRecord)
     if current_user.role != "admin":
         operator_name = current_user.real_name or current_user.username
         query = query.filter(DispositionRecord.operator == operator_name)
 
-    last_7_days = datetime.utcnow() - timedelta(days=7)
-    last_30_days = datetime.utcnow() - timedelta(days=30)
+    now = datetime.utcnow()
+    last_7_days = now - timedelta(days=7)
+    last_30_days = now - timedelta(days=30)
 
     total_count = query.count()
     last_7d_count = query.filter(
@@ -94,12 +95,33 @@ def get_dispositions_summary(
         func.count(DispositionRecord.id).desc()
     ).limit(10).all()
 
+    last_7_days_trend_raw = query.with_entities(
+        cast(DispositionRecord.created_at, SqlDate).label("day"),
+        func.count(DispositionRecord.id)
+    ).filter(
+        DispositionRecord.created_at >= last_7_days
+    ).group_by(
+        cast(DispositionRecord.created_at, SqlDate)
+    ).all()
+
+    trend_map = {str(d): int(c) for d, c in last_7_days_trend_raw}
+    last_7_days_trend = []
+    for i in range(6, -1, -1):
+        day = (now - timedelta(days=i)).date()
+        day_str = str(day)
+        label = day.strftime("%m-%d")
+        last_7_days_trend.append({
+            "date": label,
+            "count": trend_map.get(day_str, 0)
+        })
+
     return {
         "total_count": total_count,
         "last_7_days_count": last_7d_count,
         "last_30_days_count": last_30d_count,
         "by_action_type": {at: cnt for at, cnt in action_types},
-        "top_operators": [{"operator": op, "count": cnt} for op, cnt in operators]
+        "top_operators": [{"operator": op, "count": cnt} for op, cnt in operators],
+        "last_7_days_trend": last_7_days_trend,
     }
 
 

@@ -215,3 +215,19 @@ class TrendAnalysis(Base):
     volatility = Column(Float)
     anomaly_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class MonitorShareLink(Base):
+    __tablename__ = "monitor_share_link"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("user.id"))
+    duration_minutes = Column(Integer, nullable=False, default=60)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_accessed_at = Column(DateTime(timezone=True))
+    access_count = Column(Integer, default=0)
+    is_revoked = Column(Boolean, default=False)
+
+    creator = relationship("User")

@@ -47,6 +47,7 @@ import {
   timeseriesAPI,
   analyticsAPI,
   interventionAPI,
+  monitorAPI,
 } from '@/services/api'
 import { useNavigate, useLocation } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -157,15 +158,14 @@ const getActionTypeTag = (type: string) => {
   return <Tag color={info.color}>{info.text}</Tag>
 }
 
-function generateShareToken(): string {
-  const arr = new Uint8Array(16)
-  crypto.getRandomValues(arr)
-  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('')
-}
-
 interface MonitorScreenProps {
   isShareMode?: boolean
   shareToken?: string
+}
+
+function getShareTokenFromPath(path: string): string | null {
+  const match = path.match(/\/monitor\/share\/([^/?#]+)/i)
+  return match ? match[1] : null
 }
 
 function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
@@ -204,45 +204,53 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
 
   const [showcaseAlertCounts, setShowcaseAlertCounts] = useState<Record<number, number>>({})
 
-  const checkShareValidity = () => {
+  const checkShareValidity = async (): Promise<boolean> => {
     if (!isShareMode) return true
-    const pathMatch = location.pathname.match(/\/monitor\/share\/([a-f0-9]+)/i)
-    const token = pathMatch ? pathMatch[1] : null
+    const token = getShareTokenFromPath(location.pathname)
     if (!token) {
       setShareExpired(true)
       return false
     }
-    const stored = localStorage.getItem(`share_token_${token}`)
-    if (!stored) {
+    try {
+      const res = await monitorAPI.validateShareLink(token)
+      if (res.data && res.data.valid) {
+        return true
+      }
       setShareExpired(true)
       return false
-    }
-    try {
-      const data = JSON.parse(stored)
-      if (Date.now() > data.expireAt) {
-        localStorage.removeItem(`share_token_${token}`)
-        setShareExpired(true)
-        return false
-      }
-      return true
     } catch {
       setShareExpired(true)
       return false
     }
   }
 
-  useEffect(() => {
+  const doAutoRefresh = async () => {
     if (isShareMode) {
-      const valid = checkShareValidity()
+      const valid = await checkShareValidity()
       if (!valid) return
     }
-    loadData()
-    const interval = setInterval(() => {
-      if (!isShareMode || checkShareValidity()) {
-        loadData()
+    await loadData()
+  }
+
+  useEffect(() => {
+    let mounted = true
+    const init = async () => {
+      if (isShareMode) {
+        const valid = await checkShareValidity()
+        if (!valid || !mounted) return
       }
+      if (mounted) {
+        await loadData()
+      }
+    }
+    init()
+    const interval = setInterval(() => {
+      doAutoRefresh()
     }, REFRESH_INTERVAL)
-    return () => clearInterval(interval)
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
   }, [])
 
   const aggregateSensorData = (allData: any[], sensorType: string) => {
@@ -263,80 +271,116 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
       .sort((a, b) => a.time.getTime() - b.time.getTime())
   }
 
+  const loadSensorTrend = async (showcasesData: any[]) => {
+    if (showcasesData.length === 0) return
+    try {
+      const sensorPromises = sensorTypes.flatMap(st =>
+        showcasesData.slice(0, Math.min(showcasesData.length, 5)).map((sc: any) =>
+          timeseriesAPI.getShowcaseReadings(sc.id, { sensor_type: st.value, limit: 100 })
+            .catch(() => ({ data: { sensors: { [st.value]: { data: [] } } } }))
+        )
+      )
+      const allReadings = await Promise.all(sensorPromises)
+      const groupedByType: Record<string, any[]> = {}
+      sensorTypes.forEach((st, idx) => {
+        groupedByType[st.value] = []
+        for (let i = 0; i < showcasesData.slice(0, 5).length; i++) {
+          const res = allReadings[idx * showcasesData.slice(0, 5).length + i]
+          if (res?.data) groupedByType[st.value].push(res.data)
+        }
+      })
+      const result: Record<string, any[]> = {}
+      sensorTypes.forEach(st => {
+        result[st.value] = aggregateSensorData(groupedByType[st.value], st.value)
+      })
+      setSensorTrendData(result)
+    } catch (err) {
+      console.error('加载传感器趋势数据失败:', err)
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     try {
-      const [
-        statsRes,
-        alertsRes,
-        showcasesRes,
-        alertSummaryRes,
-        trendsSummaryRes,
-        dispositionsSummaryRes,
-        dispositionsRes,
-        interventionsRes,
-      ] = await Promise.all([
-        showcaseAPI.getDashboardStats().catch(() => ({ data: {} })),
-        alertAPI.getAll({ limit: 20, status: 'pending' }).catch(() => ({ data: [] })),
-        showcaseAPI.getAll().catch(() => ({ data: [] })),
-        alertAPI.getSummary().catch(() => ({ data: {} })),
-        analyticsAPI.getTrendsSummary().catch(() => ({ data: {} })),
-        analyticsAPI.getDispositionsSummary().catch(() => ({ data: {} })),
-        analyticsAPI.getDispositions({ limit: 50 }).catch(() => ({ data: [] })),
-        interventionAPI.getAll({ status: 'pending', limit: 50 }).catch(() => ({ data: [] })),
-      ])
-
-      const rawStats = statsRes.data || {}
-      const showcasesData = showcasesRes.data || []
-      setStats({
-        total_showcases: rawStats.total_showcases ?? showcasesData.length,
-        online_showcases: rawStats.online_showcases ?? showcasesData.filter((s: any) => s.status === 'active').length,
-        active_sensors: rawStats.active_sensors ?? 0,
-        active_alerts: rawStats.active_alerts ?? (alertsRes.data || []).length,
-        pending_interventions: rawStats.pending_interventions ?? (interventionsRes.data || []).filter((i: any) => i.status !== 'completed').length,
-        high_risk_showcases: rawStats.high_risk_showcases ?? showcasesData.filter((s: any) => s.risk_level === 'high').length,
-      })
-      setAlerts(alertsRes.data || [])
-      setShowcases(showcasesData)
-      setAlertSummary(alertSummaryRes.data || {})
-      setTrendsSummary(trendsSummaryRes.data || {})
-      setDispositionsSummary(dispositionsSummaryRes.data || {})
-      setDispositionsList(dispositionsRes.data || [])
-      setPendingInterventions(interventionsRes.data || [])
-
-      const alertCounts: Record<number, number> = {}
-      ;(alertsRes.data || []).forEach((alert: any) => {
-        if (alert.showcase_id) {
-          alertCounts[alert.showcase_id] = (alertCounts[alert.showcase_id] || 0) + 1
+      if (isShareMode) {
+        const token = getShareTokenFromPath(location.pathname)
+        if (!token) {
+          setShareExpired(true)
+          return
         }
-      })
-      setShowcaseAlertCounts(alertCounts)
+        const shareRes = await monitorAPI.getMonitorDashboardViaShare(token)
+        const d = shareRes.data || {}
+        const rawStats = d.stats || {}
+        const showcasesData = d.showcases || []
+        setStats({
+          total_showcases: rawStats.total_showcases ?? 0,
+          online_showcases: rawStats.online_showcases ?? 0,
+          active_sensors: rawStats.active_sensors ?? 0,
+          active_alerts: rawStats.active_alerts ?? 0,
+          pending_interventions: rawStats.pending_interventions ?? 0,
+          high_risk_showcases: rawStats.high_risk_showcases ?? 0,
+        })
+        setAlerts(d.alerts || [])
+        setShowcases(showcasesData)
+        setAlertSummary(d.alert_summary || {})
+        setTrendsSummary(d.trends_summary || {})
+        setDispositionsSummary(d.dispositions_summary || {})
 
-      if (showcasesData.length > 0) {
-        try {
-          const sensorPromises = sensorTypes.flatMap(st =>
-            showcasesData.slice(0, Math.min(showcasesData.length, 5)).map((sc: any) =>
-              timeseriesAPI.getShowcaseReadings(sc.id, { sensor_type: st.value, limit: 100 })
-                .catch(() => ({ data: { sensors: { [st.value]: { data: [] } } } }))
-            )
-          )
-          const allReadings = await Promise.all(sensorPromises)
-          const groupedByType: Record<string, any[]> = {}
-          sensorTypes.forEach((st, idx) => {
-            groupedByType[st.value] = []
-            for (let i = 0; i < showcasesData.slice(0, 5).length; i++) {
-              const res = allReadings[idx * showcasesData.slice(0, 5).length + i]
-              if (res?.data) groupedByType[st.value].push(res.data)
-            }
-          })
-          const result: Record<string, any[]> = {}
-          sensorTypes.forEach(st => {
-            result[st.value] = aggregateSensorData(groupedByType[st.value], st.value)
-          })
-          setSensorTrendData(result)
-        } catch (err) {
-          console.error('加载传感器趋势数据失败:', err)
-        }
+        const alertCounts: Record<number, number> = {}
+        ;(d.alerts || []).forEach((alert: any) => {
+          if (alert.showcase_id) {
+            alertCounts[alert.showcase_id] = (alertCounts[alert.showcase_id] || 0) + 1
+          }
+        })
+        setShowcaseAlertCounts(alertCounts)
+      } else {
+        const [
+          statsRes,
+          alertsRes,
+          showcasesRes,
+          alertSummaryRes,
+          trendsSummaryRes,
+          dispositionsSummaryRes,
+          dispositionsRes,
+          interventionsRes,
+        ] = await Promise.all([
+          showcaseAPI.getDashboardStats(),
+          alertAPI.getAll({ limit: 20, status: 'pending' }),
+          showcaseAPI.getAll(),
+          alertAPI.getSummary(),
+          analyticsAPI.getTrendsSummary(),
+          analyticsAPI.getDispositionsSummary(),
+          analyticsAPI.getDispositions({ limit: 50 }),
+          interventionAPI.getAll({ status: 'pending', limit: 50 }),
+        ])
+
+        const rawStats = statsRes.data || {}
+        const showcasesData = showcasesRes.data || []
+        setStats({
+          total_showcases: rawStats.total_showcases ?? 0,
+          online_showcases: rawStats.online_showcases ?? 0,
+          active_sensors: rawStats.active_sensors ?? 0,
+          active_alerts: rawStats.active_alerts ?? 0,
+          pending_interventions: rawStats.pending_interventions ?? 0,
+          high_risk_showcases: rawStats.high_risk_showcases ?? 0,
+        })
+        setAlerts(alertsRes.data || [])
+        setShowcases(showcasesData)
+        setAlertSummary(alertSummaryRes.data || {})
+        setTrendsSummary(trendsSummaryRes.data || {})
+        setDispositionsSummary(dispositionsSummaryRes.data || {})
+        setDispositionsList(dispositionsRes.data || [])
+        setPendingInterventions(interventionsRes.data || [])
+
+        const alertCounts: Record<number, number> = {}
+        ;(alertsRes.data || []).forEach((alert: any) => {
+          if (alert.showcase_id) {
+            alertCounts[alert.showcase_id] = (alertCounts[alert.showcase_id] || 0) + 1
+          }
+        })
+        setShowcaseAlertCounts(alertCounts)
+
+        loadSensorTrend(showcasesData)
       }
 
       setLastUpdate(new Date())
@@ -347,17 +391,20 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
     }
   }
 
-  const handleGenerateShareLink = () => {
-    const token = generateShareToken()
-    const expireAt = Date.now() + shareDuration * 60 * 1000
-    localStorage.setItem(`share_token_${token}`, JSON.stringify({
-      token,
-      expireAt,
-      createdAt: Date.now(),
-      duration: shareDuration,
-    }))
-    const link = `${window.location.origin}/monitor/share/${token}`
-    setGeneratedLink(link)
+  const handleGenerateShareLink = async () => {
+    try {
+      const res = await monitorAPI.createShareLink(shareDuration)
+      if (res.data && res.data.token) {
+        const link = `${window.location.origin}/monitor/share/${res.data.token}`
+        setGeneratedLink(link)
+        message.success(`临时链接已生成，有效期 ${shareDuration} 分钟`)
+      } else {
+        message.error('生成临时链接失败')
+      }
+    } catch (err) {
+      console.error('生成临时链接失败:', err)
+      message.error('生成临时链接失败，请重试')
+    }
   }
 
   const handleCopyLink = async () => {
@@ -468,17 +515,11 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
 
   const alertTypePieOption = useMemo(() => {
     const byAlertType = alertSummary.by_alert_type || {}
-    const data = Object.entries(byAlertType).length > 0
-      ? Object.entries(byAlertType).map(([type, count]) => ({
-          value: count as number,
-          name: alertTypeNames[type] || type,
-          itemStyle: { color: alertTypeColors[type] || '#8c8c8c' },
-        }))
-      : [
-          { value: 1, name: '超过上限', itemStyle: { color: '#ff4d4f' } },
-          { value: 1, name: '低于下限', itemStyle: { color: '#1890ff' } },
-          { value: 1, name: '高波动率', itemStyle: { color: '#fa541c' } },
-        ]
+    const data = Object.entries(byAlertType).map(([type, count]) => ({
+      value: count as number,
+      name: alertTypeNames[type] || type,
+      itemStyle: { color: alertTypeColors[type] || '#8c8c8c' },
+    }))
     return {
       title: { text: '告警类型分布', left: 'center', textStyle: { fontSize: 13 } },
       tooltip: { trigger: 'item' },
@@ -498,15 +539,7 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
 
   const dispositionTrendOption = useMemo(() => {
     const last7 = dispositionsSummary.last_7_days_trend || []
-    let chartData: { date: string; count: number }[] = []
-    if (last7.length > 0) {
-      chartData = last7
-    } else {
-      for (let i = 6; i >= 0; i--) {
-        const date = dayjs().subtract(i, 'day').format('MM-DD')
-        chartData.push({ date, count: Math.floor(Math.random() * 8) + 1 })
-      }
-    }
+    const chartData: { date: string; count: number }[] = last7.length > 0 ? last7 : []
     return {
       title: { text: '近7天处置趋势', left: 'center', textStyle: { fontSize: 13 } },
       tooltip: { trigger: 'axis' },
@@ -543,31 +576,25 @@ function MonitorScreen({ isShareMode = false }: MonitorScreenProps) {
   const dispositionTypePieOption = useMemo(() => {
     const byType = dispositionsSummary.by_action_type || {}
     const entries = Object.entries(byType)
-    const data = entries.length > 0
-      ? entries.map(([type, count]) => {
-          const tagMap: Record<string, string> = {
-            acknowledge: '告警确认', resolve: '告警处理',
-            create_intervention: '创建干预', start_intervention: '开始干预',
-            complete_intervention: '完成干预', manual_adjustment: '人工调整',
-            equipment_maintenance: '设备维护',
-          }
-          const colorMap: Record<string, string> = {
-            acknowledge: '#1890ff', resolve: '#52c41a',
-            create_intervention: '#faad14', start_intervention: '#1890ff',
-            complete_intervention: '#52c41a', manual_adjustment: '#722ed1',
-            equipment_maintenance: '#13c2c2',
-          }
-          return {
-            value: count as number,
-            name: tagMap[type] || type,
-            itemStyle: { color: colorMap[type] || '#8c8c8c' },
-          }
-        })
-      : [
-          { value: 5, name: '告警确认', itemStyle: { color: '#1890ff' } },
-          { value: 3, name: '告警处理', itemStyle: { color: '#52c41a' } },
-          { value: 2, name: '完成干预', itemStyle: { color: '#52c41a' } },
-        ]
+    const data = entries.map(([type, count]) => {
+      const tagMap: Record<string, string> = {
+        acknowledge: '告警确认', resolve: '告警处理',
+        create_intervention: '创建干预', start_intervention: '开始干预',
+        complete_intervention: '完成干预', manual_adjustment: '人工调整',
+        equipment_maintenance: '设备维护',
+      }
+      const colorMap: Record<string, string> = {
+        acknowledge: '#1890ff', resolve: '#52c41a',
+        create_intervention: '#faad14', start_intervention: '#1890ff',
+        complete_intervention: '#52c41a', manual_adjustment: '#722ed1',
+        equipment_maintenance: '#13c2c2',
+      }
+      return {
+        value: count as number,
+        name: tagMap[type] || type,
+        itemStyle: { color: colorMap[type] || '#8c8c8c' },
+      }
+    })
     return {
       title: { text: '处置类型分布', left: 'center', textStyle: { fontSize: 13 } },
       tooltip: { trigger: 'item' },

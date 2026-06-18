@@ -323,12 +323,49 @@ class InterventionRecommendation(BaseModel):
 
 class DashboardStats(BaseModel):
     total_showcases: int
+    online_showcases: int = 0
     active_sensors: int
     active_alerts: int
     pending_interventions: int
     high_risk_showcases: int
     avg_temperature: float
     avg_humidity: float
+
+
+class MonitorShareLinkCreate(BaseModel):
+    duration_minutes: int = Field(60, ge=15, le=1440, description="有效时长（分钟），15分钟~24小时")
+
+
+class MonitorShareLink(BaseModel):
+    id: int
+    token: str
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
+    duration_minutes: int
+    created_at: datetime
+    expires_at: datetime
+    last_accessed_at: Optional[datetime] = None
+    access_count: int = 0
+    is_revoked: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class MonitorShareLinkValidateResponse(BaseModel):
+    valid: bool
+    message: str
+    expires_at: Optional[datetime] = None
+    remaining_minutes: Optional[int] = None
+
+
+class MonitorScreenDashboardData(BaseModel):
+    stats: DashboardStats
+    alerts: List[Dict[str, Any]]
+    showcases: List[Dict[str, Any]]
+    alert_summary: Dict[str, Any]
+    trends_summary: Dict[str, Any]
+    dispositions_summary: Dict[str, Any]
 
 
 class MQTTSensorData(BaseModel):

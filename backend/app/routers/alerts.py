@@ -101,14 +101,22 @@ def get_alert_summary(
     acknowledged_count = query.filter(Alert.status == "acknowledged").count()
     resolved_count = query.filter(Alert.status == "resolved").count()
 
-    critical_count = query.filter(
+    critical_active = query.filter(
         Alert.level == "critical",
         Alert.status.in_(["pending", "acknowledged"])
     ).count()
-    warning_count = query.filter(
+    warning_active = query.filter(
         Alert.level == "warning",
         Alert.status.in_(["pending", "acknowledged"])
     ).count()
+    info_active = query.filter(
+        Alert.level == "info",
+        Alert.status.in_(["pending", "acknowledged"])
+    ).count()
+
+    critical_total = query.filter(Alert.level == "critical").count()
+    warning_total = query.filter(Alert.level == "warning").count()
+    info_total = query.filter(Alert.level == "info").count()
 
     last_24h = datetime.utcnow() - timedelta(hours=24)
     today_count = query.filter(Alert.triggered_at >= last_24h).count()
@@ -124,10 +132,16 @@ def get_alert_summary(
         "pending": pending_count,
         "acknowledged": acknowledged_count,
         "resolved": resolved_count,
-        "critical_active": critical_count,
-        "warning_active": warning_count,
+        "critical_active": critical_active,
+        "warning_active": warning_active,
+        "info_active": info_active,
         "last_24h_count": today_count,
-        "by_alert_type": by_alert_type
+        "by_alert_type": by_alert_type,
+        "by_level": {
+            "critical": critical_total,
+            "warning": warning_total,
+            "info": info_total,
+        },
     }
 
 

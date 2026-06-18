@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import showcases, timeseries, alerts, interventions, analytics, users, sensors
+from app.routers import showcases, timeseries, alerts, interventions, analytics, users, sensors, monitor
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +28,7 @@ app.include_router(interventions.router, prefix=f"{settings.API_PREFIX}/interven
 app.include_router(analytics.router, prefix=f"{settings.API_PREFIX}/analytics", tags=["分析统计"])
 app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["用户管理"])
 app.include_router(sensors.router, prefix=f"{settings.API_PREFIX}/sensors", tags=["传感器管理"])
+app.include_router(monitor.router, prefix=f"{settings.API_PREFIX}/monitor", tags=["监控大屏"])
 
 
 @app.get("/")
@@ -51,7 +52,7 @@ async def startup_event():
 
     try:
         from app.database import engine, Base
-        from app.models import User, Showcase, Sensor, SensorReading, Alert, Intervention, InterventionStrategy, ShowcaseProfile, DispositionRecord, TrendAnalysis, strategy_user
+        from app.models import User, Showcase, Sensor, SensorReading, Alert, Intervention, InterventionStrategy, ShowcaseProfile, DispositionRecord, TrendAnalysis, strategy_user, MonitorShareLink
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created/verified")
 
