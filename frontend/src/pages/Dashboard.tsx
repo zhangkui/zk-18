@@ -155,16 +155,32 @@ function Dashboard() {
   }
 
   const alertTypeNames: Record<string, string> = {
+    over_max: '超过上限',
+    below_min: '低于下限',
+    warning_high: '接近上限',
+    statistical_outlier: '统计异常',
+    rapid_change: '变化速率异常',
+    high_volatility: '高波动率',
+    ma_deviation: '均线偏离',
     temperature: '温度异常',
     humidity: '湿度异常',
     light: '光照异常',
     vibration: '震动异常',
+    unknown: '其他异常',
   }
   const alertTypeColors: Record<string, string> = {
+    over_max: '#ff4d4f',
+    below_min: '#1890ff',
+    warning_high: '#faad14',
+    statistical_outlier: '#722ed1',
+    rapid_change: '#eb2f96',
+    high_volatility: '#fa541c',
+    ma_deviation: '#13c2c2',
     temperature: '#ff7875',
     humidity: '#40a9ff',
     light: '#ffd666',
     vibration: '#95de64',
+    unknown: '#8c8c8c',
   }
   const byAlertType = alertSummary.by_alert_type || {}
   const alertPieData = Object.entries(byAlertType).length > 0
@@ -174,10 +190,13 @@ function Dashboard() {
         itemStyle: { color: alertTypeColors[type] || '#8c8c8c' },
       }))
     : [
-        { value: 0, name: '温度异常', itemStyle: { color: '#ff7875' } },
-        { value: 0, name: '湿度异常', itemStyle: { color: '#40a9ff' } },
-        { value: 0, name: '光照异常', itemStyle: { color: '#ffd666' } },
-        { value: 0, name: '震动异常', itemStyle: { color: '#95de64' } },
+        { value: 0, name: '超过上限', itemStyle: { color: '#ff4d4f' } },
+        { value: 0, name: '低于下限', itemStyle: { color: '#1890ff' } },
+        { value: 0, name: '接近上限', itemStyle: { color: '#faad14' } },
+        { value: 0, name: '统计异常', itemStyle: { color: '#722ed1' } },
+        { value: 0, name: '变化速率异常', itemStyle: { color: '#eb2f96' } },
+        { value: 0, name: '高波动率', itemStyle: { color: '#fa541c' } },
+        { value: 0, name: '均线偏离', itemStyle: { color: '#13c2c2' } },
       ]
 
   const alertDistributionOption = {

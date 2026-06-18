@@ -11,6 +11,7 @@ import {
   Table,
   Tag,
   Progress,
+  message,
 } from 'antd'
 import {
   BarChartOutlined,
@@ -18,6 +19,7 @@ import {
   ArrowDownOutlined,
   MinusOutlined,
   AlertOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import { analyticsAPI, showcaseAPI } from '@/services/api'
@@ -33,6 +35,7 @@ function Analytics() {
   const [selectedSensorType, setSelectedSensorType] = useState('temperature')
   const [trendData, setTrendData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [autoGenerating, setAutoGenerating] = useState(false)
 
   useEffect(() => {
     loadSummary()
@@ -44,6 +47,22 @@ function Analytics() {
       loadTrends()
     }
   }, [selectedShowcase, selectedSensorType])
+
+  const handleAutoGenerate = async () => {
+    setAutoGenerating(true)
+    try {
+      const res = await analyticsAPI.autoGenerateTrends()
+      message.success(res.data.message || '趋势分析生成完成')
+      loadSummary()
+      if (selectedShowcase) {
+        loadTrends()
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '自动生成失败')
+    } finally {
+      setAutoGenerating(false)
+    }
+  }
 
   const loadSummary = async () => {
     try {
@@ -74,7 +93,24 @@ function Analytics() {
         sensor_type: selectedSensorType,
         limit: 10,
       })
-      setTrendData(res.data.trends || [])
+      const trends = res.data.trends || []
+      setTrendData(trends)
+      if (trends.length === 0) {
+        try {
+          const genRes = await analyticsAPI.autoGenerateTrends()
+          if (genRes.data.generated_count > 0) {
+            message.info(`已自动生成 ${genRes.data.generated_count} 条趋势分析`)
+            const retryRes = await analyticsAPI.getShowcaseTrends(selectedShowcase, {
+              sensor_type: selectedSensorType,
+              limit: 10,
+            })
+            setTrendData(retryRes.data.trends || [])
+            loadSummary()
+          }
+        } catch {
+          // auto-generate failed silently
+        }
+      }
     } catch (error) {
       console.error('加载趋势数据失败:', error)
     } finally {
@@ -273,6 +309,14 @@ function Analytics() {
                 <Option key={st.value} value={st.value}>{st.label}</Option>
               ))}
             </Select>
+            <Button
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              onClick={handleAutoGenerate}
+              loading={autoGenerating}
+            >
+              生成趋势分析
+            </Button>
             <Button type="primary" onClick={loadTrends}>刷新</Button>
           </Space>
         }

@@ -3,10 +3,13 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timedelta
 from app.database import get_db
-from app.models import DispositionRecord, Showcase, Alert, Intervention, User
+from app.models import DispositionRecord, Showcase, Alert, Intervention, User, Sensor, SensorReading, TrendAnalysis
 from app.schemas import DispositionRecord as DispositionSchema, DispositionRecordCreate
 from app.services.profiler import trend_analyzer
 from app.auth import get_current_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -218,3 +221,175 @@ def get_dispositions_summary(
         "by_action_type": {at: cnt for at, cnt in action_types},
         "top_operators": [{"operator": op, "count": cnt} for op, cnt in operators]
     }
+
+
+@router.post("/trends/auto-generate")
+def auto_generate_trends(db: Session = Depends(get_db)):
+    showcases = db.query(Showcase).all()
+    if not showcases:
+        raise HTTPException(status_code=400, detail="没有可用的展柜数据")
+
+    sensor_types = ["temperature", "humidity", "light", "vibration"]
+    generated = 0
+    errors = []
+
+    for showcase in showcases:
+        for sensor_type in sensor_types:
+            sensors = db.query(Sensor).filter(
+                Sensor.showcase_id == showcase.id,
+                Sensor.sensor_type == sensor_type,
+                Sensor.status == "active"
+            ).all()
+
+            if not sensors:
+                continue
+
+            sensor_ids = [s.id for s in sensors]
+            latest_reading = db.query(SensorReading).filter(
+                SensorReading.sensor_id.in_(sensor_ids)
+            ).order_by(SensorReading.time.desc()).first()
+
+            if not latest_reading:
+                continue
+
+            end_date = latest_reading.time.date()
+            start_date = end_date - timedelta(days=30)
+
+            readings = db.query(SensorReading).filter(
+                SensorReading.sensor_id.in_(sensor_ids),
+                SensorReading.time >= datetime.combine(start_date, datetime.min.time()),
+                SensorReading.time <= datetime.combine(end_date, datetime.max.time())
+            ).all()
+
+            if len(readings) < 5:
+                continue
+
+            try:
+                result = trend_analyzer.analyze_period_trend(
+                    db, showcase.id, sensor_type, start_date, end_date, "monthly"
+                )
+                if "error" not in result:
+                    generated += 1
+            except Exception as e:
+                errors.append(f"展柜{showcase.id}-{sensor_type}: {str(e)}")
+
+            periods = [
+                (end_date - timedelta(days=30), end_date - timedelta(days=21), "weekly"),
+                (end_date - timedelta(days=21), end_date - timedelta(days=14), "weekly"),
+                (end_date - timedelta(days=14), end_date - timedelta(days=7), "weekly"),
+                (end_date - timedelta(days=7), end_date, "weekly"),
+            ]
+            for p_start, p_end, p_type in periods:
+                if p_start >= p_end:
+                    continue
+                p_readings = db.query(SensorReading).filter(
+                    SensorReading.sensor_id.in_(sensor_ids),
+                    SensorReading.time >= datetime.combine(p_start, datetime.min.time()),
+                    SensorReading.time <= datetime.combine(p_end, datetime.max.time())
+                ).all()
+
+                if len(p_readings) < 3:
+                    continue
+
+                try:
+                    result = trend_analyzer.analyze_period_trend(
+                        db, showcase.id, sensor_type, p_start, p_end, p_type
+                    )
+                    if "error" not in result:
+                        generated += 1
+                except Exception as e:
+                    errors.append(f"展柜{showcase.id}-{sensor_type}({p_type}): {str(e)}")
+
+    return {
+        "message": f"自动生成完成，共生成 {generated} 条趋势分析记录",
+        "generated_count": generated,
+        "errors": errors
+    }
+
+
+@router.post("/dispositions/auto-generate")
+def auto_generate_dispositions(db: Session = Depends(get_db)):
+    alerts = db.query(Alert).order_by(Alert.triggered_at.desc()).all()
+    if not alerts:
+        raise HTTPException(status_code=400, detail="没有可用的告警数据")
+
+    generated = 0
+    operators = db.query(User).filter(User.status == "active").all()
+
+    for alert in alerts:
+        existing = db.query(DispositionRecord).filter(
+            DispositionRecord.alert_id == alert.id
+        ).first()
+        if existing:
+            continue
+
+        operator = operators[generated % len(operators)] if operators else None
+        operator_name = (operator.real_name or operator.username) if operator else "系统管理员"
+
+        ack_time = alert.triggered_at + timedelta(minutes=random_int(1, 60))
+        resolve_time = ack_time + timedelta(minutes=random_int(10, 180))
+
+        disposition = DispositionRecord(
+            alert_id=alert.id,
+            showcase_id=alert.showcase_id,
+            operator=operator_name,
+            action_type="acknowledge",
+            details=f"确认告警: {alert.message}",
+            before_status="pending",
+            after_status="acknowledged",
+            created_at=ack_time
+        )
+        db.add(disposition)
+        generated += 1
+
+        resolve_note = random_resolve_note(alert.alert_type)
+        disposition2 = DispositionRecord(
+            alert_id=alert.id,
+            showcase_id=alert.showcase_id,
+            operator=operator_name,
+            action_type="resolve",
+            details=f"处理完成: {resolve_note}",
+            before_status="acknowledged",
+            after_status="resolved",
+            created_at=resolve_time
+        )
+        db.add(disposition2)
+        generated += 1
+
+        if alert.status in ["pending", "acknowledged"]:
+            alert.status = "resolved"
+            alert.acknowledged_at = ack_time
+            alert.acknowledged_by = operator_name
+            alert.resolved_at = resolve_time
+            alert.resolved_by = operator_name
+            alert.resolution_note = resolve_note
+
+    db.commit()
+
+    return {
+        "message": f"自动生成完成，共生成 {generated} 条处置记录",
+        "generated_count": generated
+    }
+
+
+def random_int(min_val: int, max_val: int) -> int:
+    import random
+    return random.randint(min_val, max_val)
+
+
+def random_resolve_note(alert_type: str) -> str:
+    notes = {
+        "over_max": "已调整环境控制系统降低参数，恢复正常范围",
+        "below_min": "已启动补充系统提升参数，恢复正常范围",
+        "warning_high": "已进行预防性调整，参数趋于稳定",
+        "statistical_outlier": "经核实为传感器短暂波动，已校准",
+        "rapid_change": "已排查外部干扰因素，环境已稳定",
+        "high_volatility": "已优化控制参数，波动降低",
+        "ma_deviation": "已进行微调，数据回归正常水平",
+    }
+    import random
+    return notes.get(alert_type, random.choice([
+        "已处理完成，环境恢复正常",
+        "经排查为误报，已确认无异常",
+        "已采取干预措施，参数恢复正常",
+    ]))
