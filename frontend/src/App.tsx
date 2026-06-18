@@ -13,6 +13,7 @@ import {
   AppstoreOutlined,
   SafetyCertificateOutlined,
   TeamOutlined,
+  MonitorOutlined,
 } from '@ant-design/icons'
 import { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
@@ -28,11 +29,13 @@ import Login from './pages/Login'
 import SensorManagement from './pages/SensorManagement'
 import StrategyManagement from './pages/StrategyManagement'
 import UserManagement from './pages/UserManagement'
+import MonitorScreen from './pages/MonitorScreen'
 
 const { Header, Sider, Content } = Layout
 
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: <Link to="/">数据概览</Link> },
+  { key: '/monitor', icon: <MonitorOutlined />, label: <Link to="/monitor">监控大屏</Link> },
   { key: '/showcases', icon: <EnvironmentOutlined />, label: <Link to="/showcases">展柜管理</Link> },
   { key: '/sensors', icon: <AppstoreOutlined />, label: <Link to="/sensors">传感器管理</Link> },
   { key: '/alerts', icon: <AlertOutlined />, label: <Link to="/alerts">告警中心</Link> },
@@ -61,6 +64,10 @@ function App() {
 
   if (location.pathname === '/login') {
     return <Login />
+  }
+
+  if (location.pathname.startsWith('/monitor/share/')) {
+    return <MonitorScreen isShareMode={true} />
   }
 
   const token = localStorage.getItem('token')
@@ -114,6 +121,7 @@ function App() {
         <Content className="app-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/monitor" element={<MonitorScreen />} />
             <Route path="/showcases" element={<Showcases />} />
             <Route path="/showcases/:id" element={<ShowcaseDetail />} />
             <Route path="/sensors" element={<SensorManagement />} />
